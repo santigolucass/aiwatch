@@ -43,6 +43,35 @@ sudo to install them). `rake test` runs clean locally; `rake standard`
 (and the `standard` CI job) is unverified until CI actually runs it. Worth
 checking on the first CI run rather than assuming it's clean.
 
+## Dropped the `●` active marker; color the session id instead
+
+The original `list`/`live` tables used a leading `●` column to mark active
+sessions. In a real terminal this misaligned every column after it,
+because `●` (U+25CF, Unicode East-Asian-Width category "Ambiguous") some
+terminals render as double-width while Ruby's `String#length` — and this
+project's column-width math — counts it as one character. The fix isn't a
+width-detection hack; it's dropping the glyph: active sessions are now
+shown by coloring the SESSION id itself (bold green), so there's no
+separate variable-width cell to misalign in the first place. Confirmed
+this was the actual cause (not a math bug) by checking the ANSI-stripping
+width calculation in isolation before touching the design.
+
+## `live`'s sparkline uses Braille, not block characters
+
+For the per-session token-throughput sparkline in `live`, Braille
+(U+2800–28FF) was chosen over the more common `▁▂▃▅▇█` block-element
+sparkline glyphs specifically because those blocks are *also* categorized
+"Ambiguous" width — the same category that caused the marker bug above.
+Braille is "Neutral," which in practice renders as one column reliably
+across terminals; it's why tools like `ttyplot` use it for exactly this.
+Each sparkline is self-normalized to its own session's max value (not a
+shared scale across sessions), and shown in that session's own stable
+color rather than overlaid with other sessions' lines in one shared plot
+— avoiding the cell-level color collision that a true multi-series
+overlaid chart would hit when two sessions' lines land in the same
+character cell (a terminal can only give one foreground color per
+character, not per sub-dot).
+
 ## Unknown model handling
 
 A model absent from the pricing table renders cost as `?` with a warning

@@ -14,7 +14,9 @@ Initial release. Claude Code only.
 - `aiwatch daily` — tokens and cost aggregated per local calendar day.
 - `aiwatch show <id>` — per-model breakdown for one session, resolved by a
   git-style unique id prefix.
-- `aiwatch live` — auto-refreshing view of currently active sessions.
+- `aiwatch live` — auto-refreshing view of currently active sessions, each
+  with its own stable color and a self-normalized Braille sparkline of
+  its recent token throughput.
 - Cost estimation via a `PricingTable` that fetches LiteLLM's pricing data,
   caches it locally for 24h, and falls back to a bundled snapshot when
   offline — with cache-creation tokens billed at their correct 1h/5m TTL

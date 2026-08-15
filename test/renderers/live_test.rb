@@ -21,6 +21,58 @@ class RenderersLiveTest < Minitest::Test
     end
   end
 
+  # Returns a fresh single-session snapshot each call, with output_tokens
+  # taken from `totals_sequence` in order — simulates a session's usage
+  # growing tick over tick.
+  class GrowingFakeAdapter
+    def initialize(totals_sequence, id:, file_path:)
+      @totals_sequence = totals_sequence
+      @id = id
+      @file_path = file_path
+      @call_index = 0
+    end
+
+    def discover_sessions
+      output = @totals_sequence[@call_index] || @totals_sequence.last
+      @call_index += 1
+      session = Aiwatch::Session.new(id: @id, file_path: @file_path)
+      session.add_event(Aiwatch::UsageEvent.new(
+        message_id: "m-#{@call_index}", model: "claude-sonnet-5", timestamp: Time.now, cwd: "/x",
+        input_tokens: 0, output_tokens: output, cache_creation_input_tokens: 0,
+        cache_read_input_tokens: 0, cache_creation_1h_tokens: 0, cache_creation_5m_tokens: 0
+      ))
+      [session]
+    end
+  end
+
+  # A minimal IO-like object that reports as a TTY, so color-dependent
+  # rendering (never exercised by plain StringIO, which is how a real
+  # alignment bug went uncaught before) actually runs under test.
+  class FakeTTY
+    def initialize
+      @io = StringIO.new
+    end
+
+    def tty?
+      true
+    end
+
+    def print(*args)
+      @io.print(*args)
+    end
+
+    def puts(*args)
+      @io.puts(*args)
+    end
+
+    def flush
+    end
+
+    def string
+      @io.string
+    end
+  end
+
   def calculator
     Aiwatch::CostCalculator.new(FakePricingTable.new(PRICE))
   end
@@ -94,5 +146,102 @@ class RenderersLiveTest < Minitest::Test
 
     assert_raises(RuntimeError) { live.run }
     assert_includes out.string, "\e[?25h"
+  end
+
+  def test_tokens_header_shows_the_actual_history_window
+    Tempfile.create("aiwatch-live-header") do |file|
+      File.utime(Time.now, Time.now, file.path)
+      session = build_session(file_path: file.path)
+
+      out, = run_ticks([session], 1)
+
+      # sparkline_width defaults to 20 (40 samples) at the default 2s
+      # refresh => 80s of history.
+      assert_includes out, "TOKENS/s (80s)"
+    end
+  end
+
+  def test_custom_sparkline_width_and_refresh_change_the_window_label
+    Tempfile.create("aiwatch-live-header2") do |file|
+      File.utime(Time.now, Time.now, file.path)
+      session = build_session(file_path: file.path)
+
+      out = StringIO.new
+      live = Aiwatch::Renderers::Live.new(
+        adapter: FakeAdapter.new([session]), cost_calculator: calculator,
+        out: out, in_stream: StringIO.new, quit_requested: ->(_) { true },
+        sparkline_width: 4, refresh_seconds: 2
+      )
+      live.run
+
+      assert_includes out.string, "TOKENS/s (16s)"
+    end
+  end
+
+  def test_sparkline_reflects_token_growth_across_ticks
+    Tempfile.create("aiwatch-live-growth") do |file|
+      File.utime(Time.now, Time.now, file.path)
+      adapter = GrowingFakeAdapter.new([0, 50, 120], id: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", file_path: file.path)
+
+      ticks = 0
+      quit = ->(_timeout) {
+        ticks += 1
+        ticks >= 3
+      }
+      out = StringIO.new
+      live = Aiwatch::Renderers::Live.new(
+        adapter: adapter, cost_calculator: calculator, out: out, in_stream: StringIO.new,
+        quit_requested: quit, sparkline_width: 4
+      )
+      live.run
+
+      last_frame = out.string.split("\e[H\e[2J").last
+      data_line = last_frame.lines.find { |l| l.include?("aaaaaaaa") }
+
+      refute_nil data_line
+      codepoints = data_line.codepoints.select { |cp| cp.between?(0x2800, 0x28FF) }
+      assert(codepoints.any? { |cp| cp > 0x2800 }, "expected at least one non-blank sparkline cell after growth")
+    end
+  end
+
+  def test_each_session_gets_a_stable_distinct_color_in_first_seen_order
+    Tempfile.create("aiwatch-live-a") do |file_a|
+      Tempfile.create("aiwatch-live-b") do |file_b|
+        [file_a, file_b].each { |f| File.utime(Time.now, Time.now, f.path) }
+
+        a = build_session(id: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", file_path: file_a.path)
+        b = build_session(id: "bbbbbbbb-bbbb-cccc-dddd-eeeeeeeeeeee", file_path: file_b.path)
+
+        out = FakeTTY.new
+        ticks = 0
+        quit = ->(_timeout) {
+          ticks += 1
+          ticks >= 2
+        }
+        live = Aiwatch::Renderers::Live.new(
+          adapter: FakeAdapter.new([a, b]), cost_calculator: calculator,
+          out: out, in_stream: StringIO.new, quit_requested: quit
+        )
+        live.run
+
+        frames = out.string.split("\e[H\e[2J").reject(&:empty?)
+        assert_equal 2, frames.length
+
+        colors_per_frame = frames.map do |frame|
+          line_a = frame.lines.find { |l| l.include?("aaaaaaaa") }
+          line_b = frame.lines.find { |l| l.include?("bbbbbbbb") }
+          color_of = ->(line) { line[/\e\[1;(\d+)m/, 1] }
+          [color_of.call(line_a), color_of.call(line_b)]
+        end
+
+        # Both sessions got a color, they differ from each other, and each
+        # session keeps the same color across ticks.
+        first_a, first_b = colors_per_frame.first
+        refute_nil first_a
+        refute_nil first_b
+        refute_equal first_a, first_b
+        assert(colors_per_frame.all? { |a_color, b_color| [a_color, b_color] == [first_a, first_b] })
+      end
+    end
   end
 end

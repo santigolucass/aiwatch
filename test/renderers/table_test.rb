@@ -37,7 +37,7 @@ class RenderersTableTest < Minitest::Test
     assert_includes table, "?"
   end
 
-  def test_active_marker_reflects_file_mtime
+  def test_active_session_id_is_colored_green_when_color_enabled
     Tempfile.create("aiwatch-active") do |active_file|
       Tempfile.create("aiwatch-stale") do |stale_file|
         File.utime(Time.now, Time.now, active_file.path)
@@ -46,11 +46,45 @@ class RenderersTableTest < Minitest::Test
         active = build_session(id: "1" * 8 + "-bbbb-cccc-dddd-eeeeeeeeeeee", file_path: active_file.path)
         stale = build_session(id: "2" * 8 + "-bbbb-cccc-dddd-eeeeeeeeeeee", file_path: stale_file.path)
 
-        table = Aiwatch::Renderers::Table.new(calculator).render_list([active, stale], color: false)
-        lines = table.lines
+        table = Aiwatch::Renderers::Table.new(calculator).render_list([active, stale], color: true)
 
-        assert lines.find { |l| l.include?("11111111") }.start_with?("●")
-        refute lines.find { |l| l.include?("22222222") }.start_with?("●")
+        assert_includes table, "\e[1;32m11111111\e[0m"
+        refute_includes table, "\e[1;32m22222222\e[0m"
+        assert_includes table, "22222222"
+      end
+    end
+  end
+
+  def test_no_ansi_color_when_color_disabled_even_for_active_sessions
+    Tempfile.create("aiwatch-active") do |active_file|
+      File.utime(Time.now, Time.now, active_file.path)
+      active = build_session(id: "33333333-bbbb-cccc-dddd-eeeeeeeeeeee", file_path: active_file.path)
+
+      table = Aiwatch::Renderers::Table.new(calculator).render_list([active], color: false)
+
+      refute_includes table, "\e["
+      assert_includes table, "33333333"
+    end
+  end
+
+  def test_list_columns_stay_aligned_regardless_of_active_status
+    Tempfile.create("aiwatch-active") do |active_file|
+      Tempfile.create("aiwatch-stale") do |stale_file|
+        File.utime(Time.now, Time.now, active_file.path)
+        File.utime(Time.now - 3600, Time.now - 3600, stale_file.path)
+
+        active = build_session(id: "1" * 8 + "-bbbb-cccc-dddd-eeeeeeeeeeee", file_path: active_file.path, input: 1000)
+        stale = build_session(id: "2" * 8 + "-bbbb-cccc-dddd-eeeeeeeeeeee", file_path: stale_file.path, input: 1000)
+
+        table = Aiwatch::Renderers::Table.new(calculator).render_list([active, stale], color: true)
+        data_rows = table.lines.map(&:rstrip)[1..] # skip the header row, which has no "$"
+
+        # The COST column must start at the same visible column on every
+        # data row, whether or not that row's session id carries ANSI
+        # color — this is the exact bug an ambiguous-width marker glyph
+        # caused.
+        cost_columns = data_rows.map { |l| Aiwatch::Renderers::TextTable.visible_length(l.split("$").first) }
+        assert_equal 1, cost_columns.uniq.length
       end
     end
   end

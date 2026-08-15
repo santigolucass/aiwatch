@@ -43,13 +43,14 @@ Recent sessions, sorted by last activity.
 
 ```
 $ aiwatch list --all
-   SESSION   PROJECT                   MODEL(S)                       INPUT  OUTPUT  CACHE R/W  COST (USD)  LAST ACTIVITY
-●  b3f1a7c2  /home/dev/code/myapp      claude-sonnet-5,claude-opus-5    195   16.7K  1.6M/1.4M     $6.9205  5h ago
-   e9c4d8a1  /home/dev/code/docs-site  claude-sonnet-5                   60    3.1K   90K/200K     $0.8491  1d ago
+SESSION   PROJECT                   MODEL(S)                       INPUT  OUTPUT  CACHE R/W  COST (USD)  LAST ACTIVITY
+b3f1a7c2  /home/dev/code/myapp      claude-sonnet-5,claude-opus-5    195   16.7K  1.6M/1.4M     $6.9205  12h ago
+e9c4d8a1  /home/dev/code/docs-site  claude-sonnet-5                   60    3.1K   90K/200K     $0.8491  2d ago
 ```
 
-`●` marks a session whose log file was modified in the last 5 minutes
-(configurable with `--active-minutes`).
+A session's id is shown in green (on a TTY) when its log file was modified
+in the last 5 minutes — i.e. it's active (configurable with
+`--active-minutes`).
 
 ```
 Options:
@@ -94,15 +95,30 @@ An ambiguous prefix lists the matching session ids instead of guessing.
 ### `aiwatch live`
 
 Auto-refreshing view of currently active sessions (default: every 2s).
-Press `q` or Ctrl-C to quit — both work instantly, no Enter needed.
+Press `q` or Ctrl-C to quit — both work instantly, no Enter needed. Each
+session gets its own color (stable for the life of the run, assigned in
+the order sessions first appear) and a small sparkline of its recent
+token throughput, so you can see multiple agents' activity at a glance —
+a flat line means idle, a filled one means it's actively working:
 
 ```
 $ aiwatch live
-aiwatch live — 12:11:54 — 1 active session(s) — press q to quit
+aiwatch live — 19:08:57 — 1 active session(s) — press q to quit
 
-   SESSION   PROJECT               MODEL(S)                       INPUT  OUTPUT  CACHE R/W  COST (USD)  LAST ACTIVITY
-●  b3f1a7c2  /home/dev/code/myapp  claude-sonnet-5,claude-opus-5    195   16.7K  1.6M/1.4M     $6.9205  5h ago
+SESSION   PROJECT               MODEL(S)                       COST (USD)  TOKENS/s (40s)        LAST ACTIVITY
+b3f1a7c2  /home/dev/code/myapp  claude-sonnet-5,claude-opus-5     $7.5546  ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢰⡇  12h ago
 ```
+
+(`b3f1a7c2` and its sparkline render in the same color; a second
+concurrent session would get a different one.)
+
+The sparkline is self-normalized per session — it shows *that* session's
+own recent trend, not an absolute scale comparable across sessions. It's
+built from Braille characters rather than fancier Unicode blocks on
+purpose: Braille is Unicode "Neutral" width and reliably renders as one
+terminal column everywhere, unlike some symbols that render double-width
+in certain terminals and silently break column alignment (an earlier
+version of this view used `●` for an active marker and hit exactly that).
 
 ```
 Options:
