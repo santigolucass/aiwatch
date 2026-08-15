@@ -43,6 +43,22 @@ module Aiwatch
       model_usages.empty?
     end
 
+    def total_input_tokens
+      model_usages.values.sum(&:input_tokens)
+    end
+
+    def total_output_tokens
+      model_usages.values.sum(&:output_tokens)
+    end
+
+    def total_cache_read_tokens
+      model_usages.values.sum(&:cache_read_tokens)
+    end
+
+    def total_cache_creation_tokens
+      model_usages.values.sum(&:cache_creation_tokens)
+    end
+
     def active?(now: Time.now, threshold_minutes: 5)
       return false unless File.exist?(file_path)
 
