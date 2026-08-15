@@ -3,7 +3,7 @@
 require_relative "../test_helper"
 require "tempfile"
 
-class Renderers__TableTest < Minitest::Test
+class RenderersTableTest < Minitest::Test
   include SessionFactory
 
   PRICE = {

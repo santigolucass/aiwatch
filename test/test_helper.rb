@@ -19,9 +19,7 @@ class FakePricingTable
     @prices[model]
   end
 
-  def prices
-    @prices
-  end
+  attr_reader :prices
 
   def warnings
     []
@@ -29,7 +27,7 @@ class FakePricingTable
 end
 
 module SessionFactory
-  def build_session(id: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", file_path: "/dev/null",
+  def build_session(id: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", file_path: File::NULL,
     model: "claude-sonnet-5", input: 1000, output: 500, cache_read: 0,
     cache_1h: 0, cache_5m: 0, timestamp: Time.now, project: "/home/x/project")
     session = Aiwatch::Session.new(id: id, file_path: file_path)

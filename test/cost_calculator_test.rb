@@ -61,7 +61,7 @@ class CostCalculatorTest < Minitest::Test
 
   def test_falls_back_to_standard_rate_when_above_1hr_rate_is_absent
     usage = build_usage(cache_creation_1h_tokens: 1_000_000)
-    price = SONNET_PRICE.reject { |k, _| k == "cache_creation_input_token_cost_above_1hr" }
+    price = SONNET_PRICE.except("cache_creation_input_token_cost_above_1hr")
     calc = calculator("claude-sonnet-5" => price)
 
     assert_in_delta 1_000_000 * 2.5e-6, calc.cost_for(usage), 1e-9

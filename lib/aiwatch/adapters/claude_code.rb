@@ -41,7 +41,7 @@ module Aiwatch
 
           obj = begin
             JSON.parse(line)
-          rescue StandardError
+          rescue
             session.note_skipped_line
             next
           end

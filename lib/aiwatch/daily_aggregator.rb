@@ -1,7 +1,5 @@
 # frozen_string_literal: true
 
-require "set"
-
 module Aiwatch
   # Rolls sessions' per-(date, model) usage up into one row per local
   # calendar day across all sessions. A session can contribute to more than

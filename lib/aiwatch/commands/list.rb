@@ -4,7 +4,7 @@ module Aiwatch
   module Commands
     class List < Base
       DEFAULT_SINCE = "7d"
-      SINCE_PATTERN = /\A(\d+)d\z/.freeze
+      SINCE_PATTERN = /\A(\d+)d\z/
 
       private
 

@@ -4,7 +4,7 @@ require_relative "../test_helper"
 require "stringio"
 require "tempfile"
 
-class Renderers__LiveTest < Minitest::Test
+class RenderersLiveTest < Minitest::Test
   include SessionFactory
 
   PRICE = {
@@ -29,7 +29,10 @@ class Renderers__LiveTest < Minitest::Test
   def run_ticks(sessions, n)
     out = StringIO.new
     ticks = 0
-    quit = ->(_timeout) { ticks += 1; ticks >= n }
+    quit = ->(_timeout) {
+      ticks += 1
+      ticks >= n
+    }
 
     live = Aiwatch::Renderers::Live.new(
       adapter: FakeAdapter.new(sessions), cost_calculator: calculator,

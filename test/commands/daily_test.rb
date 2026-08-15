@@ -2,7 +2,7 @@
 
 require_relative "../test_helper"
 
-class Commands__DailyTest < Minitest::Test
+class CommandsDailyTest < Minitest::Test
   include SessionFactory
 
   PRICE = {

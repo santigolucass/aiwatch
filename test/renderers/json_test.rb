@@ -2,7 +2,7 @@
 
 require_relative "../test_helper"
 
-class Renderers__JsonTest < Minitest::Test
+class RenderersJsonTest < Minitest::Test
   include SessionFactory
 
   PRICE = {

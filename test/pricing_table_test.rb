@@ -23,7 +23,7 @@ class PricingTableTest < Minitest::Test
   end
 
   def failing_http_get
-    ->(_url, open_timeout:, read_timeout:) { nil }
+    ->(_url, open_timeout:, read_timeout:) {}
   end
 
   def test_uses_fresh_cache_without_hitting_the_network
@@ -31,7 +31,10 @@ class PricingTableTest < Minitest::Test
       File.write(cache_path, JSON.generate(FRESH_PRICES))
 
       calls = 0
-      http_get = ->(*) { calls += 1; nil }
+      http_get = ->(*) {
+        calls += 1
+        nil
+      }
       table = build(cache_path: cache_path, snapshot_path: snapshot_path, http_get: http_get)
 
       assert_equal FRESH_PRICES, table.prices

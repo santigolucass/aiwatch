@@ -9,7 +9,7 @@ module Aiwatch
   # A model absent from the pricing table prices as nil, never a silent 0 —
   # see docs/decisions.md.
   class CostCalculator
-    Total = Struct.new(:amount, :unknown_models, keyword_init: true) do
+    Total = Struct.new(:amount, :unknown_models) do
       def fully_known?
         unknown_models.empty?
       end

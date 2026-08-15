@@ -2,7 +2,7 @@
 
 require_relative "../test_helper"
 
-class Commands__LiveTest < Minitest::Test
+class CommandsLiveTest < Minitest::Test
   PRICE = {}.freeze
 
   class FakeAdapter

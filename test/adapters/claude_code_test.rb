@@ -2,7 +2,7 @@
 
 require_relative "../test_helper"
 
-class Adapters__ClaudeCodeTest < Minitest::Test
+class AdaptersClaudeCodeTest < Minitest::Test
   include FixturePath
 
   def adapter

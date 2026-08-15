@@ -12,7 +12,7 @@ module Aiwatch
       DAILY_HEADERS = ["DATE", "SESSIONS", "INPUT", "OUTPUT", "CACHE R/W", "COST (USD)"].freeze
       DAILY_ALIGN = [:left, :right, :right, :right, :right, :right].freeze
 
-      ANSI = /\e\[[0-9;]*m/.freeze
+      ANSI = /\e\[[0-9;]*m/
 
       def initialize(cost_calculator)
         @cost_calculator = cost_calculator
@@ -105,7 +105,7 @@ module Aiwatch
       def justify(cell, width, align)
         pad = width - visible_length(cell)
         pad = 0 if pad.negative?
-        align == :right ? (" " * pad) + cell.to_s : cell.to_s + (" " * pad)
+        (align == :right) ? (" " * pad) + cell.to_s : cell.to_s + (" " * pad)
       end
 
       def visible_length(cell)

@@ -29,7 +29,7 @@ module Aiwatch
       http.read_timeout = read_timeout
       response = http.get(uri.request_uri)
       response.is_a?(Net::HTTPSuccess) ? response.body : nil
-    rescue StandardError
+    rescue
       nil
     end
 
@@ -91,7 +91,7 @@ module Aiwatch
     def write_cache(data)
       FileUtils.mkdir_p(File.dirname(@cache_path))
       File.write(@cache_path, JSON.generate(data))
-    rescue StandardError
+    rescue
       nil # non-fatal: pricing still works this run, it just won't be cached
     end
 
