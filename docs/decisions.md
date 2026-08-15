@@ -30,6 +30,19 @@ See `docs/claude-code-format.md` rule 5. The slug is lossy; `cwd` is exact.
 Using "most frequent" rather than "first" or "last" is a defensive
 tie-breaker for the (unobserved) case of a `cwd` changing mid-session.
 
+## GitHub username
+
+The gemspec homepage and README clone URL use `santigolucass`, verified
+via `gh api user` — not guessed from the commit author or email.
+
+## `standard` not run locally
+
+`standard`'s dependency `prism` needs to compile a native extension, which
+needs `ruby-dev` headers not installed on this machine (and no passwordless
+sudo to install them). `rake test` runs clean locally; `rake standard`
+(and the `standard` CI job) is unverified until CI actually runs it. Worth
+checking on the first CI run rather than assuming it's clean.
+
 ## Unknown model handling
 
 A model absent from the pricing table renders cost as `?` with a warning

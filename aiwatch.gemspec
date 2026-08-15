@@ -3,7 +3,7 @@ require_relative "lib/aiwatch/version"
 Gem::Specification.new do |spec|
   spec.name = "aiwatch"
   spec.version = Aiwatch::VERSION
-  spec.authors = ["Lucas"]
+  spec.authors = ["Lucas Santiago"]
   spec.email = ["lucas.stgom@gmail.com"]
 
   spec.summary = "An htop for your local AI coding agents"
@@ -12,7 +12,7 @@ Gem::Specification.new do |spec|
     and reports token usage and estimated cost per session, per day, and live as
     agents run — without sending anything anywhere.
   DESC
-  spec.homepage = "https://github.com/lucasstgom/aiwatch"
+  spec.homepage = "https://github.com/santigolucass/aiwatch"
   spec.license = "MIT"
   spec.required_ruby_version = ">= 3.2.0"
 
