@@ -12,10 +12,12 @@ require_relative "aiwatch/format"
 require_relative "aiwatch/daily_aggregator"
 require_relative "aiwatch/renderers/table"
 require_relative "aiwatch/renderers/json"
+require_relative "aiwatch/renderers/live"
 require_relative "aiwatch/commands/base"
 require_relative "aiwatch/commands/list"
 require_relative "aiwatch/commands/daily"
 require_relative "aiwatch/commands/show"
+require_relative "aiwatch/commands/live"
 require_relative "aiwatch/cli"
 
 module Aiwatch
