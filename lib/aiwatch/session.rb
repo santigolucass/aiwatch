@@ -1,15 +1,20 @@
 # frozen_string_literal: true
 
+require "date"
+
 module Aiwatch
   # A single Claude Code session (one JSONL file), with token usage
-  # aggregated per model.
+  # aggregated per model, and separately per (local calendar date, model)
+  # for `daily` rollups — a session's events can span more than one day.
   class Session
-    attr_reader :id, :file_path, :model_usages, :first_seen_at, :last_seen_at, :skipped_lines
+    attr_reader :id, :file_path, :model_usages, :daily_usages,
+      :first_seen_at, :last_seen_at, :skipped_lines
 
     def initialize(id:, file_path:)
       @id = id
       @file_path = file_path
       @model_usages = {}
+      @daily_usages = {}
       @cwd_counts = Hash.new(0)
       @first_seen_at = nil
       @last_seen_at = nil
@@ -19,6 +24,11 @@ module Aiwatch
     def add_event(event)
       usage = (@model_usages[event.model] ||= ModelUsage.new(model: event.model))
       usage.add(event)
+
+      daily_key = [event.timestamp.getlocal.to_date, event.model]
+      daily_usage = (@daily_usages[daily_key] ||= ModelUsage.new(model: event.model))
+      daily_usage.add(event)
+
       @cwd_counts[event.cwd] += 1 if event.cwd
       @first_seen_at = event.timestamp if @first_seen_at.nil? || event.timestamp < @first_seen_at
       @last_seen_at = event.timestamp if @last_seen_at.nil? || event.timestamp > @last_seen_at

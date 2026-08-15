@@ -56,6 +56,20 @@ class SessionTest < Minitest::Test
     end
   end
 
+  def test_daily_usages_bucket_by_local_calendar_date_and_model
+    session = Aiwatch::Session.new(id: "sess-1", file_path: "/dev/null")
+    day1 = Time.iso8601("2026-08-01T12:00:00Z")
+    day2 = Time.iso8601("2026-08-02T12:00:00Z")
+
+    session.add_event(build_event(model: "claude-sonnet-5", timestamp: day1, input_tokens: 10))
+    session.add_event(build_event(model: "claude-sonnet-5", timestamp: day1, input_tokens: 5))
+    session.add_event(build_event(model: "claude-opus-5", timestamp: day2, input_tokens: 7))
+
+    assert_equal 2, session.daily_usages.size
+    assert_equal 15, session.daily_usages[[day1.getlocal.to_date, "claude-sonnet-5"]].input_tokens
+    assert_equal 7, session.daily_usages[[day2.getlocal.to_date, "claude-opus-5"]].input_tokens
+  end
+
   def test_short_id
     session = Aiwatch::Session.new(id: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", file_path: "/dev/null")
 

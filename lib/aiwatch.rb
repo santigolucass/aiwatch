@@ -9,10 +9,13 @@ require_relative "aiwatch/adapters/claude_code"
 require_relative "aiwatch/pricing_table"
 require_relative "aiwatch/cost_calculator"
 require_relative "aiwatch/format"
+require_relative "aiwatch/daily_aggregator"
 require_relative "aiwatch/renderers/table"
 require_relative "aiwatch/renderers/json"
 require_relative "aiwatch/commands/base"
 require_relative "aiwatch/commands/list"
+require_relative "aiwatch/commands/daily"
+require_relative "aiwatch/commands/show"
 require_relative "aiwatch/cli"
 
 module Aiwatch
