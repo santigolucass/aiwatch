@@ -77,21 +77,25 @@ class RenderersLiveTest < Minitest::Test
     Aiwatch::CostCalculator.new(FakePricingTable.new(PRICE))
   end
 
-  # Ticks n times, then requests a quit, returning everything written to `out`.
-  def run_ticks(sessions, n)
-    out = StringIO.new
-    ticks = 0
-    quit = ->(_timeout) {
-      ticks += 1
-      ticks >= n
-    }
+  # Runs `live` feeding it exactly `events` in order (each a read_event
+  # return value — :timeout, :up, :down, :kill, :confirm, :cancel), then
+  # :quit once the queue is exhausted. One render happens before the loop
+  # even starts, so events.length + 1 renders happen for an all-:timeout
+  # queue (each :timeout also triggers a real data refresh).
+  def run_with(adapter:, events:, out: StringIO.new, **opts)
+    queue = events.dup
+    read_event = ->(_timeout) { queue.empty? ? :quit : queue.shift }
 
     live = Aiwatch::Renderers::Live.new(
-      adapter: FakeAdapter.new(sessions), cost_calculator: calculator,
-      out: out, in_stream: StringIO.new, quit_requested: quit
+      adapter: adapter, cost_calculator: calculator, out: out, in_stream: StringIO.new,
+      read_event: read_event, **opts
     )
     live.run
-    [out.string, ticks]
+    out.respond_to?(:string) ? out.string : out
+  end
+
+  def run_events(sessions, events, **opts)
+    run_with(adapter: FakeAdapter.new(sessions), events: events, **opts)
   end
 
   def test_renders_only_active_sessions
@@ -103,7 +107,7 @@ class RenderersLiveTest < Minitest::Test
         active = build_session(id: "11111111-bbbb-cccc-dddd-eeeeeeeeeeee", file_path: active_file.path)
         stale = build_session(id: "22222222-bbbb-cccc-dddd-eeeeeeeeeeee", file_path: stale_file.path)
 
-        out, = run_ticks([active, stale], 1)
+        out = run_events([active, stale], [])
 
         assert_includes out, "11111111"
         refute_includes out, "22222222"
@@ -113,39 +117,20 @@ class RenderersLiveTest < Minitest::Test
   end
 
   def test_shows_placeholder_when_nothing_is_active
-    out, = run_ticks([], 1)
+    out = run_events([], [])
 
     assert_includes out, "0 active session(s)"
-    assert_includes out, "no active sessions"
+    assert_includes out, "(no active sessions)"
   end
 
-  def test_refreshes_once_per_tick_until_quit
-    out, ticks = run_ticks([], 3)
+  def test_refreshes_once_per_timeout_until_quit
+    out = run_events([], [:timeout, :timeout])
 
-    assert_equal 3, ticks
-    assert_equal 3, out.scan("press q to quit").length
-  end
-
-  # Regression test: setup_terminal puts the tty into raw mode, which
-  # disables the terminal's own \n -> \r\n translation for the whole
-  # device (stdin and stdout share one tty). A renderer that emits bare
-  # "\n" then draws each line starting wherever the previous one's cursor
-  # ended, cascading further right every frame — this is what the user
-  # actually saw, independent of column width or Unicode width.
-  def test_every_line_ends_with_crlf_so_raw_mode_does_not_cascade_lines
-    Tempfile.create("aiwatch-live-crlf") do |file|
-      File.utime(Time.now, Time.now, file.path)
-      session = build_session(file_path: file.path)
-
-      out, = run_ticks([session], 1)
-      frame = out.split("\e[H\e[2J").last
-
-      refute_includes frame.gsub("\r\n", ""), "\n", "found a bare \\n not paired with \\r in: #{frame.inspect}"
-    end
+    assert_equal 3, out.scan("\e[H\e[2J").length
   end
 
   def test_restores_the_terminal_on_quit
-    out, = run_ticks([], 1)
+    out = run_events([], [])
 
     assert_includes out, "\e[?25h"
   end
@@ -159,7 +144,7 @@ class RenderersLiveTest < Minitest::Test
 
     live = Aiwatch::Renderers::Live.new(
       adapter: adapter, cost_calculator: calculator,
-      out: out, in_stream: StringIO.new, quit_requested: ->(_) { true }
+      out: out, in_stream: StringIO.new, read_event: ->(_) { :quit }
     )
 
     assert_raises(RuntimeError) { live.run }
@@ -171,7 +156,7 @@ class RenderersLiveTest < Minitest::Test
       File.utime(Time.now, Time.now, file.path)
       session = build_session(file_path: file.path)
 
-      out, = run_ticks([session], 1)
+      out = run_events([session], [])
 
       # sparkline_width defaults to 20 (40 samples) at the default 2s
       # refresh => 80s of history.
@@ -184,15 +169,9 @@ class RenderersLiveTest < Minitest::Test
       File.utime(Time.now, Time.now, file.path)
       session = build_session(file_path: file.path)
 
-      out = StringIO.new
-      live = Aiwatch::Renderers::Live.new(
-        adapter: FakeAdapter.new([session]), cost_calculator: calculator,
-        out: out, in_stream: StringIO.new, quit_requested: ->(_) { true },
-        sparkline_width: 4, refresh_seconds: 2
-      )
-      live.run
+      out = run_events([session], [], sparkline_width: 4, refresh_seconds: 2)
 
-      assert_includes out.string, "TOKENS/s (16s)"
+      assert_includes out, "TOKENS/s (16s)"
     end
   end
 
@@ -201,24 +180,29 @@ class RenderersLiveTest < Minitest::Test
       File.utime(Time.now, Time.now, file.path)
       adapter = GrowingFakeAdapter.new([0, 50, 120], id: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", file_path: file.path)
 
-      ticks = 0
-      quit = ->(_timeout) {
-        ticks += 1
-        ticks >= 3
-      }
-      out = StringIO.new
-      live = Aiwatch::Renderers::Live.new(
-        adapter: adapter, cost_calculator: calculator, out: out, in_stream: StringIO.new,
-        quit_requested: quit, sparkline_width: 4
-      )
-      live.run
+      out = run_with(adapter: adapter, events: [:timeout, :timeout], sparkline_width: 4)
 
-      last_frame = out.string.split("\e[H\e[2J").last
-      data_line = last_frame.lines.find { |l| l.include?("aaaaaaaa") }
+      last_frame = out.split("\e[H\e[2J").last
+      # The detail panel's "Session:  aaaaaaaa-..." line also matches; the
+      # table row (with the sparkline) is the last matching line, not the
+      # first.
+      data_line = last_frame.lines.reverse.find { |l| l.include?("aaaaaaaa") }
 
       refute_nil data_line
       codepoints = data_line.codepoints.select { |cp| cp.between?(0x2800, 0x28FF) }
       assert(codepoints.any? { |cp| cp > 0x2800 }, "expected at least one non-blank sparkline cell after growth")
+    end
+  end
+
+  def test_every_line_ends_with_crlf_so_raw_mode_does_not_cascade_lines
+    Tempfile.create("aiwatch-live-crlf") do |file|
+      File.utime(Time.now, Time.now, file.path)
+      session = build_session(file_path: file.path)
+
+      out = run_events([session], [])
+      frame = out.split("\e[H\e[2J").last
+
+      refute_includes frame.gsub("\r\n", ""), "\n", "found a bare \\n not paired with \\r in: #{frame.inspect}"
     end
   end
 
@@ -236,8 +220,10 @@ class RenderersLiveTest < Minitest::Test
         cache_read_input_tokens: 0, cache_creation_1h_tokens: 0, cache_creation_5m_tokens: 0
       ))
 
-      out, = run_ticks([session], 1)
-      data_line = out.lines.find { |l| l.include?(session.short_id) }
+      out = run_events([session], [])
+      # The detail panel's "Session:  <full-uuid>" line also starts with
+      # the short id; the table row is the last matching line.
+      data_line = out.lines.reverse.find { |l| l.include?(session.short_id) }
 
       refute_nil data_line
       assert(data_line.length < 120, "expected row to stay well under terminal width, was #{data_line.length} chars")
@@ -253,36 +239,152 @@ class RenderersLiveTest < Minitest::Test
         a = build_session(id: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", file_path: file_a.path)
         b = build_session(id: "bbbbbbbb-bbbb-cccc-dddd-eeeeeeeeeeee", file_path: file_b.path)
 
-        out = FakeTTY.new
-        ticks = 0
-        quit = ->(_timeout) {
-          ticks += 1
-          ticks >= 2
-        }
-        live = Aiwatch::Renderers::Live.new(
-          adapter: FakeAdapter.new([a, b]), cost_calculator: calculator,
-          out: out, in_stream: StringIO.new, quit_requested: quit
-        )
-        live.run
+        out = run_events([a, b], [:timeout], out: FakeTTY.new)
 
-        frames = out.string.split("\e[H\e[2J").reject(&:empty?)
+        frames = out.split("\e[H\e[2J").reject(&:empty?)
         assert_equal 2, frames.length
 
         colors_per_frame = frames.map do |frame|
-          line_a = frame.lines.find { |l| l.include?("aaaaaaaa") }
-          line_b = frame.lines.find { |l| l.include?("bbbbbbbb") }
+          line_a = frame.lines.reverse.find { |l| l.include?("aaaaaaaa") }
+          line_b = frame.lines.reverse.find { |l| l.include?("bbbbbbbb") }
           color_of = ->(line) { line[/\e\[1;(\d+)m/, 1] }
           [color_of.call(line_a), color_of.call(line_b)]
         end
 
-        # Both sessions got a color, they differ from each other, and each
-        # session keeps the same color across ticks.
         first_a, first_b = colors_per_frame.first
         refute_nil first_a
         refute_nil first_b
         refute_equal first_a, first_b
         assert(colors_per_frame.all? { |a_color, b_color| [a_color, b_color] == [first_a, first_b] })
       end
+    end
+  end
+
+  # --- Interactive navigation and detail panel ---
+
+  def test_first_session_is_selected_by_default_and_shown_in_the_detail_panel
+    Tempfile.create("aiwatch-live-a") do |file_a|
+      Tempfile.create("aiwatch-live-b") do |file_b|
+        [file_a, file_b].each { |f| File.utime(Time.now, Time.now, f.path) }
+        a = build_session(id: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", file_path: file_a.path, timestamp: Time.now)
+        b = build_session(id: "bbbbbbbb-bbbb-cccc-dddd-eeeeeeeeeeee", file_path: file_b.path, timestamp: Time.now - 10)
+
+        out = run_events([a, b], [])
+
+        assert_includes out, "Session:  aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+        data_lines = out.lines.select { |l| l.include?("aaaaaaaa") || l.include?("bbbbbbbb") }
+        assert(data_lines.any? { |l| l.start_with?(">") && l.include?("aaaaaaaa") })
+      end
+    end
+  end
+
+  def test_down_arrow_moves_selection_to_the_next_session_and_updates_the_panel
+    Tempfile.create("aiwatch-live-a") do |file_a|
+      Tempfile.create("aiwatch-live-b") do |file_b|
+        [file_a, file_b].each { |f| File.utime(Time.now, Time.now, f.path) }
+        a = build_session(id: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", file_path: file_a.path, timestamp: Time.now)
+        b = build_session(id: "bbbbbbbb-bbbb-cccc-dddd-eeeeeeeeeeee", file_path: file_b.path, timestamp: Time.now - 10)
+
+        out = run_events([a, b], [:down])
+        last_frame = out.split("\e[H\e[2J").last
+
+        assert_includes last_frame, "Session:  bbbbbbbb-bbbb-cccc-dddd-eeeeeeeeeeee"
+      end
+    end
+  end
+
+  def test_selection_does_not_move_past_the_last_session
+    Tempfile.create("aiwatch-live-a") do |file|
+      File.utime(Time.now, Time.now, file.path)
+      session = build_session(file_path: file.path)
+
+      out = run_events([session], [:down, :down])
+      last_frame = out.split("\e[H\e[2J").last
+
+      assert_includes last_frame, "Session:  #{session.id}"
+    end
+  end
+
+  def test_up_arrow_moves_selection_back_up
+    Tempfile.create("aiwatch-live-a") do |file_a|
+      Tempfile.create("aiwatch-live-b") do |file_b|
+        [file_a, file_b].each { |f| File.utime(Time.now, Time.now, f.path) }
+        a = build_session(id: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", file_path: file_a.path, timestamp: Time.now)
+        b = build_session(id: "bbbbbbbb-bbbb-cccc-dddd-eeeeeeeeeeee", file_path: file_b.path, timestamp: Time.now - 10)
+
+        out = run_events([a, b], [:down, :up])
+        last_frame = out.split("\e[H\e[2J").last
+
+        assert_includes last_frame, "Session:  aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+      end
+    end
+  end
+
+  # --- Kill flow ---
+
+  def test_x_shows_a_confirmation_prompt_without_killing_yet
+    Tempfile.create("aiwatch-live-kill") do |file|
+      File.utime(Time.now, Time.now, file.path)
+      session = build_session(file_path: file.path)
+      killed = false
+
+      out = run_events([session], [:kill], process_finder: ->(_path) { 999 }, killer: ->(_pid, _sig) { killed = true })
+      last_frame = out.split("\e[H\e[2J").last
+
+      assert_includes last_frame, "Kill session #{session.short_id}? y = confirm, n/Esc = cancel"
+      refute killed
+    end
+  end
+
+  def test_confirming_a_kill_sends_sigterm_to_the_process_found_for_that_session
+    Tempfile.create("aiwatch-live-kill") do |file|
+      File.utime(Time.now, Time.now, file.path)
+      session = build_session(file_path: file.path)
+      calls = []
+      finder = ->(path) {
+        calls << [:find, path]
+        4242
+      }
+      killer = ->(pid, signal) { calls << [:kill, pid, signal] }
+
+      out = run_events([session], [:kill, :confirm], process_finder: finder, killer: killer)
+
+      assert_equal [:find, file.path], calls[0]
+      assert_equal [:kill, 4242, "TERM"], calls[1]
+      assert_includes out, "Sent SIGTERM to process 4242"
+    end
+  end
+
+  def test_cancelling_a_kill_does_not_call_the_killer
+    Tempfile.create("aiwatch-live-kill") do |file|
+      File.utime(Time.now, Time.now, file.path)
+      session = build_session(file_path: file.path)
+      killed = false
+
+      out = run_events(
+        [session], [:kill, :cancel],
+        process_finder: ->(_path) { 999 }, killer: ->(_pid, _sig) { killed = true }
+      )
+
+      refute killed
+      last_frame = out.split("\e[H\e[2J").last
+      refute_includes last_frame, "Kill session"
+    end
+  end
+
+  def test_kill_reports_when_no_process_is_found_for_the_session
+    Tempfile.create("aiwatch-live-kill") do |file|
+      File.utime(Time.now, Time.now, file.path)
+      session = build_session(file_path: file.path)
+      killed = false
+
+      out = run_events(
+        [session], [:kill, :confirm],
+        process_finder: ->(_path) {}, killer: ->(_pid, _sig) { killed = true }
+      )
+
+      refute killed
+      assert_includes out, "Could not find a running process for session #{session.short_id}"
     end
   end
 end

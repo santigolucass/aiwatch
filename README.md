@@ -94,25 +94,51 @@ An ambiguous prefix lists the matching session ids instead of guessing.
 
 ### `aiwatch live`
 
-Auto-refreshing view of currently active sessions (default: every 2s).
-Press `q` or Ctrl-C to quit — both work instantly, no Enter needed. Each
-session gets its own color (stable for the life of the run, assigned in
-the order sessions first appear) and a small sparkline of its recent
-token throughput, so you can see multiple agents' activity at a glance —
-a low flat baseline means idle, a filled one means it's actively working:
+Interactive, auto-refreshing view of currently active sessions (default:
+every 2s) — an `htop` for your agents. `↑`/`↓` move a selection cursor
+between sessions and expand a detail panel above the table for whichever
+one is selected; `x` asks for confirmation, then sends `SIGTERM` to the
+process behind that session; `q` or Ctrl-C quits. All of these act
+instantly, no Enter needed. Each session also gets its own color (stable
+for the life of the run, assigned in the order sessions first appear)
+and a small sparkline of its recent token throughput — a low flat
+baseline means idle, a filled one means it's actively working:
 
 ```
 $ aiwatch live
-aiwatch live — 19:08:57 — 1 active session(s) — press q to quit
+aiwatch live — 19:08:57 — 2 active session(s)
 
-SESSION   PROJECT               MODEL(S)                  COST (USD)  TOKENS/s (80s)        LAST ACTIVITY
-b3f1a7c2  /home/dev/code/myapp  claude-sonnet-5,claude-…     $7.5546  ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⣠⣴⣿⣦⣀  just now
+Session:  b3f1a7c2-4e6d-4a9b-8f21-7d5c9e2a11f0
+Project:  /home/dev/code/myapp
+Activity: just now -> just now
+Cost:     $0.2359
+
+MODEL            INPUT  OUTPUT  CACHE READ  CACHE CREATE  COST (USD)
+claude-sonnet-5    165     18K           0             0     $0.1807
+claude-opus-5       30    2.2K           0             0     $0.0552
+
+   SESSION   PROJECT                   MODEL(S)                  COST (USD)  TOKENS/s (80s)        LAST ACTIVITY
+>  b3f1a7c2  /home/dev/code/myapp      claude-sonnet-5,claude-…     $0.2359  ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣀⣤⣾⣷⣄  just now
+   e9c4d8a1  /home/dev/code/docs-site  claude-sonnet-5              $0.0311  ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣀⣀⣀⣀⣀  just now
+
+↑/↓ select session   x kill selected session   q quit
 ```
 
-(`b3f1a7c2` and its sparkline render in the same color; a second
-concurrent session would get a different one. `PROJECT` and `MODEL(S)`
-are truncated with `…` past a fixed width so a long path or a multi-model
-list can't push the row wider than the terminal and wrap.)
+(`b3f1a7c2` — the selected row, marked `>` — and its sparkline render in
+the same color; `e9c4d8a1` gets a different one. `PROJECT` and
+`MODEL(S)` are truncated with `…` past a fixed width so a long path or a
+multi-model list can't push the row wider than the terminal and wrap.
+The selection cursor is a plain `>`, not a Unicode glyph, for the same
+reason the sparkline uses Braille and not block characters — see below.)
+
+Pressing `x` replaces the footer with a confirmation prompt
+(`Kill session b3f1a7c2? y = confirm, n/Esc = cancel`) before anything
+happens — killing an agent's process is irreversible and might land
+mid-task, so it never fires on a single accidental keypress. Finding
+*which* process to signal works by scanning `/proc/*/fd` for whoever has
+that session's log file open, so this only works on Linux; on other
+platforms `live` reports "could not find a running process" instead of
+silently doing nothing.
 
 The sparkline is self-normalized per session — it shows *that* session's
 own recent trend, not an absolute scale comparable across sessions. It's

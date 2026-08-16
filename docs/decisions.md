@@ -127,6 +127,42 @@ single low dot instead. `last_n_padded` now pads with `nil` rather than
 reads as a flat line, matching the "flat = idle" description this
 project already gives it, rather than as empty space.
 
+## `live` is interactive: ↑/↓ select, x kills (with confirmation)
+
+↑/↓ move a cursor between sessions; the selected one expands into a
+detail panel above the table, reusing `Table#render_show` (the exact
+same content as `aiwatch show <id>`) rather than a separate rendering
+path. `x` always asks for confirmation (`y`/`n`/Esc) before acting —
+killing an agent's process is irreversible and can land mid-task, so
+this never fires on a single accidental keypress. The signal sent is
+SIGTERM, not SIGKILL, to give the process a chance to react rather than
+dying instantly.
+
+The selection cursor is a plain ASCII `>`/` ` leading column, not a
+Unicode glyph — same reasoning as dropping `●` for the active marker:
+anything with ambiguous terminal width risks the exact column-alignment
+bug this project already hit twice.
+
+Selection tracks a session *id*, not a table row index, and is
+re-synced after every refresh: if the selected session disappears
+(inactivity, or it was just killed), selection falls back to the first
+remaining session rather than pointing at whatever now occupies that row
+index, which would silently select the wrong session.
+
+## Killing a session's process: `/proc`-only, no external dependency
+
+`aiwatch` only ever read `.jsonl` files before this; it had no notion of
+*which OS process* was writing to one. To resolve a session back to a
+PID for `live`'s kill action, `ProcessFinder` scans `/proc/*/fd`,
+comparing each open file descriptor's target against the session's log
+path — the only way to do this without shelling out to `lsof` (an
+external binary, and not guaranteed present) or adding a gem, both of
+which would break the zero-runtime-dependency goal. This is Linux-only:
+`/proc` doesn't exist on macOS, so `ProcessFinder.find_pid` returns
+`nil` there rather than raising, and `live` reports "process not found"
+— a real limitation, not silently pretending it worked, and cheap to
+extend with an `lsof`-based fallback later if macOS support matters.
+
 ## Unknown model handling
 
 A model absent from the pricing table renders cost as `?` with a warning
