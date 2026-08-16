@@ -136,7 +136,7 @@ module Aiwatch
         @pending_kill_id = nil
         return unless session
 
-        pid = session.project && @process_finder.call(session.project)
+        pid = @process_finder.call(session.file_path)
         if pid
           @killer.call(pid, "TERM")
           # active? is based on the log file's mtime, which killing the

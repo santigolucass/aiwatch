@@ -137,10 +137,12 @@ Pressing `x` replaces the footer with a confirmation prompt
 happens — killing an agent's process is irreversible and might land
 mid-task, so it never fires on a single accidental keypress. Finding
 *which* process to signal works by matching a running `claude` process's
-current working directory (`/proc/PID/cwd`) against the session's
-project, so this only works on Linux; on other platforms, or if more
-than one process matches, `live` reports "could not find a running
-process" instead of guessing. A killed session disappears from the list
+current working directory against the session's *project directory*
+(where it launched — not wherever the agent's tool calls later `cd`'d
+to, e.g. into a git worktree), so this only works on Linux; on other
+platforms, or if more than one process matches, `live` reports "could
+not find a running process" instead of guessing. A killed session
+disappears from the list
 on the next refresh — including the immediate one `live` triggers right
 after the kill, so you don't have to wait or press `r` yourself.
 

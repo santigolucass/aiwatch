@@ -149,29 +149,50 @@ re-synced after every refresh: if the selected session disappears
 remaining session rather than pointing at whatever now occupies that row
 index, which would silently select the wrong session.
 
-## Killing a session's process: match by cwd + command name, not by open fd
+## Killing a session's process: match by project directory, not by cwd
 
 `aiwatch` only ever read `.jsonl` files before this; it had no notion of
-*which OS process* was writing to one. The first `ProcessFinder`
-implementation scanned `/proc/*/fd` for whoever had the session's log
-file open — which turned out to be wrong in practice, not just
-occasionally flaky: checked against real running `claude` processes,
-**none** had their `.jsonl` open at any given instant, because Claude
-Code writes it append-only (open, write, close) per event rather than
-holding the descriptor open. `live`'s kill action reported "process not
-found" essentially every time.
+*which OS process* was writing to one, and `ProcessFinder` went through
+two wrong approaches before landing on a reliable one:
 
-Fixed by matching on `/proc/PID/cwd` (maintained continuously by the
-kernel, independent of what files happen to be open) against the
-session's `project` — which already *is* the cwd Claude Code recorded
-for that session — filtered to processes whose `/proc/PID/comm` is
-`claude`. Both still avoid shelling out to `lsof` or adding a gem, so
-the zero-runtime-dependency goal holds. Linux-only: `/proc` doesn't
-exist on macOS, so `ProcessFinder.find_pid` returns `nil` there rather
-than raising. It also returns `nil`, not a guess, when zero *or more
-than one* process matches (e.g. two terminals open in the same
-project) — sending a signal to the wrong process is worse than not
-finding one.
+1. Scanning `/proc/*/fd` for whoever had the session's log file open.
+   Wrong in practice, not just occasionally flaky: checked against real
+   running `claude` processes, **none** had their `.jsonl` open at any
+   given instant, because Claude Code writes it append-only (open,
+   write, close) per event rather than holding the descriptor open.
+2. Matching `/proc/PID/cwd` against `Session#project` (the session's
+   *most frequent* cwd). Also wrong, and in a way real usage hits
+   constantly: `project` drifts to wherever the agent's tool calls
+   happened — a subdirectory, a git worktree — while the actual OS
+   process never leaves wherever `claude` was launched. Checked against
+   a real session where the agent spent 408 of 456 events inside a git
+   worktree subdirectory: `Session#project` pointed at the worktree,
+   the real process's `/proc/PID/cwd` was still the repo root, and the
+   match failed every time.
+
+What's actually stable: a session's log file lives under
+`~/.claude/projects/<slug>/`, and that slug is derived from the launch
+directory once, at session start — it never moves just because the
+agent `cd`s around later. `ProcessFinder.find_pid` now takes the session
+file path, reads its parent directory's name as the target slug, and
+compares that against each candidate process's *own* cwd
+(`/proc/PID/cwd`, kernel-maintained, independent of open files),
+slugified the same way Claude Code names project directories
+(`/` and `.` → `-`) — filtered to processes whose `/proc/PID/comm` is
+`claude`. Verified against the same real worktree-heavy session: resolves
+to the correct PID now.
+
+This still avoids shelling out to `lsof` or adding a gem, so the
+zero-runtime-dependency goal holds. Linux-only: `/proc` doesn't exist on
+macOS, so `ProcessFinder.find_pid` returns `nil` there rather than
+raising. It also returns `nil`, not a guess, when zero *or more than
+one* process matches (e.g. two terminals launched from the same
+directory) — sending a signal to the wrong process is worse than not
+finding one. The one known residual gap: slugifying is many-to-one
+(different real paths can theoretically collapse to the same slug), so
+a match is not mathematically guaranteed correct — just true for every
+real case checked so far, and far more reliable than the two prior
+attempts.
 
 ## A killed session is suppressed locally, not re-derived from the file
 

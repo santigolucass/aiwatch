@@ -19,7 +19,8 @@ Initial release. Claude Code only.
   sparkline of its recent token throughput. `↑`/`↓` select a session and
   expand a detail panel above the table; `x` asks for confirmation, then
   sends `SIGTERM` to the process behind the selected session (matched by
-  `/proc/PID/cwd` — Linux only); `r` refreshes on demand.
+  project directory, not by wherever the agent last `cd`'d to — Linux
+  only); `r` refreshes on demand.
 - Cost estimation via a `PricingTable` that fetches LiteLLM's pricing data,
   caches it locally for 24h, and falls back to a bundled snapshot when
   offline — with cache-creation tokens billed at their correct 1h/5m TTL
