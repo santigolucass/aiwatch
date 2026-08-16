@@ -85,11 +85,15 @@ module Aiwatch
         end
       end
 
+      # PROJECT and MODEL(S) are capped the same way as in Table — see
+      # docs/decisions.md.
+      COLUMN_MAX_WIDTHS = [nil, 28, 24, nil, nil, nil].freeze
+
       def session_table(sessions, now)
         color = @out.respond_to?(:tty?) && @out.tty?
         headers = ["SESSION", "PROJECT", "MODEL(S)", "COST (USD)", "TOKENS/s (#{window_label})", "LAST ACTIVITY"]
         rows = sessions.map { |s| session_row(s, now, color) }
-        TextTable.render(headers, rows, [:left, :left, :left, :right, :left, :left])
+        TextTable.render(headers, rows, [:left, :left, :left, :right, :left, :left], max_widths: COLUMN_MAX_WIDTHS)
       end
 
       def session_row(session, now, color)

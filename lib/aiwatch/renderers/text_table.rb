@@ -17,8 +17,17 @@ module Aiwatch
 
       module_function
 
-      def render(headers, rows, aligns = nil)
+      # max_widths: optional per-column cap (nil entries are uncapped). A
+      # cell over its column's cap is truncated with a trailing "…" — for
+      # unbounded fields like a project path or a model list, which
+      # otherwise make the whole row wider than a normal terminal and wrap,
+      # which looks exactly like broken column alignment (see
+      # docs/decisions.md). Never applied to a column that may carry ANSI
+      # color codes: truncation is byte/char-position based and would cut
+      # mid-escape-sequence.
+      def render(headers, rows, aligns = nil, max_widths: nil)
         aligns ||= Array.new(headers.length, :left)
+        rows = rows.map { |row| cap_row(row, max_widths) }
         widths = headers.each_index.map do |i|
           ([visible_length(headers[i])] + rows.map { |r| visible_length(r[i]) }).max
         end
@@ -38,6 +47,18 @@ module Aiwatch
 
       def visible_length(cell)
         cell.to_s.gsub(ANSI, "").length
+      end
+
+      def truncate(cell, max)
+        text = cell.to_s
+        return text if text.length <= max || max < 2
+        text[0, max - 1] + "…"
+      end
+
+      def cap_row(row, max_widths)
+        return row unless max_widths
+
+        row.each_with_index.map { |cell, i| max_widths[i] ? truncate(cell, max_widths[i]) : cell }
       end
     end
   end

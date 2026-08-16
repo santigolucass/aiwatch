@@ -72,6 +72,23 @@ overlaid chart would hit when two sessions' lines land in the same
 character cell (a terminal can only give one foreground color per
 character, not per sub-dot).
 
+## `PROJECT` and `MODEL(S)` columns are capped and truncated
+
+Both were unbounded — a real absolute project path or a multi-model
+comma list can easily push a `list`/`live` row past 100+ visible columns,
+which wraps in a normal-width terminal and, in a screenshot, looks
+indistinguishable from broken column alignment (which is what this was
+mistaken for after the `●`-marker fix, since that fix didn't touch
+column width at all and the row was still just as wide). `TextTable.render`
+now accepts `max_widths:`, and any cell over its column's cap is
+truncated with a trailing "…". Not applied to any column that may carry
+ANSI color codes (`SESSION`, `live`'s sparkline) — truncation is a plain
+character-count operation and would cut mid-escape-sequence.
+
+This bounds the row but doesn't make it adapt to the actual terminal
+width; a very narrow terminal (well under 80 columns) can still wrap it,
+especially in `live` where the sparkline alone is 20 columns wide.
+
 ## Unknown model handling
 
 A model absent from the pricing table renders cost as `?` with a warning

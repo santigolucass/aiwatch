@@ -10,6 +10,11 @@ module Aiwatch
     class Table
       LIST_HEADERS = ["SESSION", "PROJECT", "MODEL(S)", "INPUT", "OUTPUT", "CACHE R/W", "COST (USD)", "LAST ACTIVITY"].freeze
       LIST_ALIGN = [:left, :left, :left, :right, :right, :right, :right, :left].freeze
+      # PROJECT and MODEL(S) are the only unbounded columns (a real absolute
+      # path, or a comma list of models on a multi-model session); capped so
+      # a long value can't push the row wider than a normal terminal and
+      # wrap, which looks like broken alignment (see docs/decisions.md).
+      LIST_MAX_WIDTHS = [nil, 32, 24, nil, nil, nil, nil, nil].freeze
 
       DAILY_HEADERS = ["DATE", "SESSIONS", "INPUT", "OUTPUT", "CACHE R/W", "COST (USD)"].freeze
       DAILY_ALIGN = [:left, :right, :right, :right, :right, :right].freeze
@@ -20,7 +25,7 @@ module Aiwatch
 
       def render_list(sessions, now: Time.now, color: false, active_threshold_minutes: 5)
         rows = sessions.map { |s| list_row(s, now, color, active_threshold_minutes) }
-        TextTable.render(LIST_HEADERS, rows, LIST_ALIGN)
+        TextTable.render(LIST_HEADERS, rows, LIST_ALIGN, max_widths: LIST_MAX_WIDTHS)
       end
 
       def render_daily(daily_rows)

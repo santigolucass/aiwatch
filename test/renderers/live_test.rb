@@ -204,6 +204,29 @@ class RenderersLiveTest < Minitest::Test
     end
   end
 
+  def test_long_project_and_model_list_are_truncated_so_the_row_does_not_wrap
+    Tempfile.create("aiwatch-live-wide") do |file|
+      File.utime(Time.now, Time.now, file.path)
+      session = build_session(
+        file_path: file.path,
+        project: "/home/someone/work/a/very/deeply/nested/project/directory/path/name",
+        model: "claude-sonnet-5"
+      )
+      session.add_event(Aiwatch::UsageEvent.new(
+        message_id: "m2", model: "claude-opus-5", timestamp: Time.now, cwd: session.project,
+        input_tokens: 1, output_tokens: 1, cache_creation_input_tokens: 0,
+        cache_read_input_tokens: 0, cache_creation_1h_tokens: 0, cache_creation_5m_tokens: 0
+      ))
+
+      out, = run_ticks([session], 1)
+      data_line = out.lines.find { |l| l.include?(session.short_id) }
+
+      refute_nil data_line
+      assert(data_line.length < 120, "expected row to stay well under terminal width, was #{data_line.length} chars")
+      assert_includes data_line, "…"
+    end
+  end
+
   def test_each_session_gets_a_stable_distinct_color_in_first_seen_order
     Tempfile.create("aiwatch-live-a") do |file_a|
       Tempfile.create("aiwatch-live-b") do |file_b|

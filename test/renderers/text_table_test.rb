@@ -39,4 +39,23 @@ class RenderersTextTableTest < Minitest::Test
     assert_equal 3, Aiwatch::Renderers::TextTable.visible_length("\e[32mfoo\e[0m")
     assert_equal 0, Aiwatch::Renderers::TextTable.visible_length("")
   end
+
+  def test_max_widths_truncates_long_cells_with_ellipsis_and_caps_the_column
+    long_path = "/home/someone/a/very/long/nested/project/directory/path"
+    out = Aiwatch::Renderers::TextTable.render(
+      ["ID", "PROJECT"], [["x", long_path], ["y", "/short"]], nil, max_widths: [nil, 20]
+    )
+    lines = out.lines.map(&:rstrip)
+
+    assert(lines.all? { |l| l.length <= "ID  ".length + 20 })
+    assert_includes lines[1], "…"
+    refute_includes lines[1], long_path
+  end
+
+  def test_max_widths_leaves_short_cells_and_other_columns_untouched
+    out = Aiwatch::Renderers::TextTable.render(["ID", "PROJECT"], [["x", "/short"]], nil, max_widths: [nil, 20])
+
+    assert_includes out, "/short"
+    refute_includes out, "…"
+  end
 end

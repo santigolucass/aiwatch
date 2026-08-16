@@ -89,6 +89,27 @@ class RenderersTableTest < Minitest::Test
     end
   end
 
+  def test_long_project_path_is_truncated_so_the_row_does_not_wrap
+    session = build_session(project: "/home/someone/work/a/very/deeply/nested/project/directory/path/name")
+    table = Aiwatch::Renderers::Table.new(calculator).render_list([session])
+    data_line = table.lines[1]
+
+    assert(data_line.length < 120, "expected row to stay well under terminal width, was #{data_line.length} chars")
+    assert_includes data_line, "…"
+  end
+
+  def test_long_model_list_is_truncated
+    session = build_session(model: "a-model-with-quite-a-long-name-indeed")
+    session.add_event(Aiwatch::UsageEvent.new(
+      message_id: "m2", model: "another-quite-long-model-name", timestamp: Time.now, cwd: "/home/x/project",
+      input_tokens: 1, output_tokens: 1, cache_creation_input_tokens: 0,
+      cache_read_input_tokens: 0, cache_creation_1h_tokens: 0, cache_creation_5m_tokens: 0
+    ))
+    table = Aiwatch::Renderers::Table.new(calculator).render_list([session])
+
+    assert_includes table.lines[1], "…"
+  end
+
   def test_render_daily_formats_rows
     day = {date: "2026-08-10", session_count: 3, input_tokens: 1500, output_tokens: 500,
            cache_read_tokens: 0, cache_creation_tokens: 0, cost: 1.5, fully_known: true}
