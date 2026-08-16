@@ -135,10 +135,11 @@ Pressing `x` replaces the footer with a confirmation prompt
 (`Kill session b3f1a7c2? y = confirm, n/Esc = cancel`) before anything
 happens — killing an agent's process is irreversible and might land
 mid-task, so it never fires on a single accidental keypress. Finding
-*which* process to signal works by scanning `/proc/*/fd` for whoever has
-that session's log file open, so this only works on Linux; on other
-platforms `live` reports "could not find a running process" instead of
-silently doing nothing.
+*which* process to signal works by matching a running `claude` process's
+current working directory (`/proc/PID/cwd`) against the session's
+project, so this only works on Linux; on other platforms, or if more
+than one process matches, `live` reports "could not find a running
+process" instead of guessing.
 
 The sparkline is self-normalized per session — it shows *that* session's
 own recent trend, not an absolute scale comparable across sessions. It's

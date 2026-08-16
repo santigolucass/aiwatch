@@ -2,47 +2,67 @@
 
 require_relative "test_helper"
 require "tmpdir"
-require "rbconfig"
 
 class ProcessFinderTest < Minitest::Test
-  def test_finds_the_pid_of_a_process_with_the_file_open
+  def test_finds_a_process_by_cwd_and_command_name
     skip "requires /proc (Linux only)" unless File.directory?("/proc")
 
-    with_holder_process do |pid, path|
-      found = wait_until { Aiwatch::ProcessFinder.find_pid(path) }
+    with_process(command: %w[sleep 5]) do |pid, dir|
+      found = wait_until { Aiwatch::ProcessFinder.find_pid(dir, command_name: "sleep") }
       assert_equal pid, found
     end
   end
 
-  def test_returns_nil_when_no_process_has_the_file_open
+  def test_returns_nil_when_the_command_name_does_not_match_even_if_cwd_does
+    skip "requires /proc (Linux only)" unless File.directory?("/proc")
+
+    with_process(command: %w[sleep 5]) do |_pid, dir|
+      wait_until { Aiwatch::ProcessFinder.find_pid(dir, command_name: "sleep") } # ensure it's registered
+      assert_nil Aiwatch::ProcessFinder.find_pid(dir, command_name: "claude")
+    end
+  end
+
+  def test_returns_nil_when_no_process_has_that_cwd
     skip "requires /proc (Linux only)" unless File.directory?("/proc")
 
     Dir.mktmpdir do |dir|
-      path = File.join(dir, "unused.jsonl")
-      File.write(path, "")
+      assert_nil Aiwatch::ProcessFinder.find_pid(dir, command_name: "sleep")
+    end
+  end
 
-      assert_nil Aiwatch::ProcessFinder.find_pid(path)
+  def test_returns_nil_when_more_than_one_process_matches_rather_than_guessing
+    skip "requires /proc (Linux only)" unless File.directory?("/proc")
+
+    Dir.mktmpdir do |dir|
+      pid1 = Process.spawn("sleep", "5", chdir: dir, out: File::NULL, err: File::NULL)
+      pid2 = Process.spawn("sleep", "5", chdir: dir, out: File::NULL, err: File::NULL)
+      begin
+        wait_until { Aiwatch::ProcessFinder.find_pid(dir, command_name: "sleep") } # ensure both registered
+        assert_nil Aiwatch::ProcessFinder.find_pid(dir, command_name: "sleep")
+      ensure
+        [pid1, pid2].each { |pid| kill_and_wait(pid) }
+      end
     end
   end
 
   private
 
-  # Spawns a separate Ruby process that opens `path` and holds it open —
-  # deliberately not opened by this test process itself, or find_pid could
-  # match the test process's own fd instead of the child's.
-  def with_holder_process
+  def with_process(command:)
     Dir.mktmpdir do |dir|
-      path = File.join(dir, "holder.jsonl")
-      File.write(path, "")
-
-      pid = Process.spawn(RbConfig.ruby, "-e", "File.open(ARGV[0]); sleep 5", path, out: File::NULL, err: File::NULL)
+      pid = Process.spawn(*command, chdir: dir, out: File::NULL, err: File::NULL)
       begin
-        yield pid, path
+        yield pid, dir
       ensure
-        Process.kill("KILL", pid)
-        Process.wait(pid)
+        kill_and_wait(pid)
       end
     end
+  end
+
+  def kill_and_wait(pid)
+    Process.kill("KILL", pid)
+    Process.wait(pid)
+  rescue Errno::ESRCH, Errno::ECHILD
+    nil
   end
 
   def wait_until(timeout: 2)

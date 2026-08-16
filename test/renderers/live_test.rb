@@ -349,7 +349,7 @@ class RenderersLiveTest < Minitest::Test
 
       out = run_events([session], [:kill, :confirm], process_finder: finder, killer: killer)
 
-      assert_equal [:find, file.path], calls[0]
+      assert_equal [:find, session.project], calls[0]
       assert_equal [:kill, 4242, "TERM"], calls[1]
       assert_includes out, "Sent SIGTERM to process 4242"
     end

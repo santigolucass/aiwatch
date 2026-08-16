@@ -134,7 +134,7 @@ module Aiwatch
         @pending_kill_id = nil
         return unless session
 
-        pid = @process_finder.call(session.file_path)
+        pid = session.project && @process_finder.call(session.project)
         if pid
           @killer.call(pid, "TERM")
           @status_message = "Sent SIGTERM to process #{pid} (session #{session.short_id})."

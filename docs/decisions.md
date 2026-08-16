@@ -149,19 +149,29 @@ re-synced after every refresh: if the selected session disappears
 remaining session rather than pointing at whatever now occupies that row
 index, which would silently select the wrong session.
 
-## Killing a session's process: `/proc`-only, no external dependency
+## Killing a session's process: match by cwd + command name, not by open fd
 
 `aiwatch` only ever read `.jsonl` files before this; it had no notion of
-*which OS process* was writing to one. To resolve a session back to a
-PID for `live`'s kill action, `ProcessFinder` scans `/proc/*/fd`,
-comparing each open file descriptor's target against the session's log
-path — the only way to do this without shelling out to `lsof` (an
-external binary, and not guaranteed present) or adding a gem, both of
-which would break the zero-runtime-dependency goal. This is Linux-only:
-`/proc` doesn't exist on macOS, so `ProcessFinder.find_pid` returns
-`nil` there rather than raising, and `live` reports "process not found"
-— a real limitation, not silently pretending it worked, and cheap to
-extend with an `lsof`-based fallback later if macOS support matters.
+*which OS process* was writing to one. The first `ProcessFinder`
+implementation scanned `/proc/*/fd` for whoever had the session's log
+file open — which turned out to be wrong in practice, not just
+occasionally flaky: checked against real running `claude` processes,
+**none** had their `.jsonl` open at any given instant, because Claude
+Code writes it append-only (open, write, close) per event rather than
+holding the descriptor open. `live`'s kill action reported "process not
+found" essentially every time.
+
+Fixed by matching on `/proc/PID/cwd` (maintained continuously by the
+kernel, independent of what files happen to be open) against the
+session's `project` — which already *is* the cwd Claude Code recorded
+for that session — filtered to processes whose `/proc/PID/comm` is
+`claude`. Both still avoid shelling out to `lsof` or adding a gem, so
+the zero-runtime-dependency goal holds. Linux-only: `/proc` doesn't
+exist on macOS, so `ProcessFinder.find_pid` returns `nil` there rather
+than raising. It also returns `nil`, not a guess, when zero *or more
+than one* process matches (e.g. two terminals open in the same
+project) — sending a signal to the wrong process is worse than not
+finding one.
 
 ## Unknown model handling
 
