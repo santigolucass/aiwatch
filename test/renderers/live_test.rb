@@ -126,6 +126,24 @@ class RenderersLiveTest < Minitest::Test
     assert_equal 3, out.scan("press q to quit").length
   end
 
+  # Regression test: setup_terminal puts the tty into raw mode, which
+  # disables the terminal's own \n -> \r\n translation for the whole
+  # device (stdin and stdout share one tty). A renderer that emits bare
+  # "\n" then draws each line starting wherever the previous one's cursor
+  # ended, cascading further right every frame — this is what the user
+  # actually saw, independent of column width or Unicode width.
+  def test_every_line_ends_with_crlf_so_raw_mode_does_not_cascade_lines
+    Tempfile.create("aiwatch-live-crlf") do |file|
+      File.utime(Time.now, Time.now, file.path)
+      session = build_session(file_path: file.path)
+
+      out, = run_ticks([session], 1)
+      frame = out.split("\e[H\e[2J").last
+
+      refute_includes frame.gsub("\r\n", ""), "\n", "found a bare \\n not paired with \\r in: #{frame.inspect}"
+    end
+  end
+
   def test_restores_the_terminal_on_quit
     out, = run_ticks([], 1)
 

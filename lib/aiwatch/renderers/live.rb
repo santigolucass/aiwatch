@@ -54,10 +54,22 @@ module Aiwatch
         record_tick(sessions)
 
         @out.print "\e[H\e[2J"
-        @out.puts "aiwatch live — #{now.strftime("%H:%M:%S")} — #{sessions.length} active session(s) — press q to quit"
-        @out.puts
-        @out.puts sessions.empty? ? "(no active sessions)" : session_table(sessions, now)
+        write_line "aiwatch live — #{now.strftime("%H:%M:%S")} — #{sessions.length} active session(s) — press q to quit"
+        write_line
+        body = sessions.empty? ? "(no active sessions)" : session_table(sessions, now)
+        body.each_line(chomp: true) { |line| write_line(line) }
         @out.flush if @out.respond_to?(:flush)
+      end
+
+      # setup_terminal puts the tty into raw mode, which disables the
+      # terminal's own \n -> \r\n translation (OPOST/ONLCR) for the whole
+      # device (stdin and stdout share one tty) — not just for stdin
+      # reads. A plain #puts (bare "\n") then moves the cursor down a row
+      # without returning to column 0, so each line starts wherever the
+      # previous one ended, cascading further right every frame. Writing
+      # "\r\n" ourselves sidesteps relying on that translation entirely.
+      def write_line(text = "")
+        @out.print "#{text}\r\n"
       end
 
       def active_sessions(now)

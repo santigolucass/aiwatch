@@ -89,6 +89,24 @@ This bounds the row but doesn't make it adapt to the actual terminal
 width; a very narrow terminal (well under 80 columns) can still wrap it,
 especially in `live` where the sparkline alone is 20 columns wide.
 
+## `live` writes `\r\n`, not a bare `\n`
+
+The actual cause of the "still misaligned, nothing changed" report (after
+both the `●`-marker fix and the column-width cap): `setup_terminal` puts
+the tty into raw mode via `@in.raw!` before every render. Raw mode clears
+`OPOST`/`ONLCR` on the *whole* tty device — stdin and stdout share one
+device when connected to a real terminal, so this is not scoped to
+input — which is exactly the automatic `\n` → `\r\n` translation a normal
+terminal relies on. `puts`/`print "...\n"` then just moves the cursor
+down a row without returning to column 0, so every line starts wherever
+the previous one's cursor ended, cascading further right frame after
+frame. This never showed up in testing because it only manifests once
+raw mode is genuinely engaged on a real tty — a plain `StringIO`/pipe
+target never exercises it, same class of gap as the color bug. Fixed by
+writing `\r\n` explicitly for every line `live` draws instead of relying
+on the terminal to translate it, which is also just what any full-screen
+raw-mode CLI (vim, htop) has to do.
+
 ## Unknown model handling
 
 A model absent from the pricing table renders cost as `?` with a warning
