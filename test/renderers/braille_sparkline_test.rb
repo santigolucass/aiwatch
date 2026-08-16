@@ -4,17 +4,27 @@ require_relative "../test_helper"
 
 class RenderersBrailleSparklineTest < Minitest::Test
   BLANK = 0x2800
+  BASELINE = 0x2800 + Aiwatch::Renderers::BrailleSparkline::LEFT_LEVELS.first + Aiwatch::Renderers::BrailleSparkline::RIGHT_LEVELS.first
 
-  def test_all_zero_series_renders_as_blank
+  def test_all_zero_recorded_series_renders_as_a_low_baseline_not_blank
+    # 10 real recorded ticks, all with zero throughput (idle) — distinct
+    # from "no data yet", which is what a genuinely blank slot means.
     out = Aiwatch::Renderers::BrailleSparkline.render([0] * 10, width: 5)
 
     assert_equal 5, out.length
-    assert(out.codepoints.all? { |cp| cp == BLANK })
+    assert(out.codepoints.all? { |cp| cp == BASELINE })
   end
 
-  def test_pads_shorter_series_on_the_left_with_zeros
+  def test_negative_recorded_value_also_renders_as_baseline
+    out = Aiwatch::Renderers::BrailleSparkline.render([-5, -5], width: 1)
+
+    assert_equal BASELINE, out.ord
+  end
+
+  def test_pads_shorter_series_on_the_left_with_blanks
     # A single trailing sample lands in the last character's *right*
-    # sub-column (newest), with the left sub-column left blank (padding).
+    # sub-column (newest); the left sub-column has no recorded sample at
+    # all (unlike a real recorded 0), so it stays truly blank.
     out = Aiwatch::Renderers::BrailleSparkline.render([100], width: 1)
 
     assert_equal BLANK + 0xB8, out.ord

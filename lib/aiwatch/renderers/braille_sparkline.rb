@@ -19,8 +19,12 @@ module Aiwatch
 
       module_function
 
-      # values: numeric series, oldest first. Self-normalizes to its own
-      # max (0 or all-blank/negative series render as a flat blank line).
+      # values: numeric series, oldest first; a slot with no recorded
+      # sample yet must be nil, not 0 — nil renders fully blank (no data),
+      # while a recorded 0 (a real tick with no throughput) renders a low
+      # single-dot baseline, so an idle *tracked* session reads as a flat
+      # line rather than empty space indistinguishable from "not working".
+      # Self-normalizes to its own max.
       # width: number of Braille characters to emit (each holds 2 samples).
       def render(values, width:)
         samples = last_n_padded(values, width * 2)
@@ -35,13 +39,14 @@ module Aiwatch
 
       def last_n_padded(values, n)
         tail = values.last(n)
-        tail = ([0] * (n - tail.length)) + tail if tail.length < n
+        tail = ([nil] * (n - tail.length)) + tail if tail.length < n
         tail
       end
       private_class_method :last_n_padded
 
       def fill_bits(value, max, levels)
-        return 0 if value.nil? || value <= 0
+        return 0 if value.nil?
+        return levels.first(1).sum if value <= 0
 
         level = [(value / max * levels.length).ceil, levels.length].min
         levels.first(level).sum

@@ -107,6 +107,26 @@ writing `\r\n` explicitly for every line `live` draws instead of relying
 on the terminal to translate it, which is also just what any full-screen
 raw-mode CLI (vim, htop) has to do.
 
+## Sparkline: a recorded zero is a low baseline dot, not blank space
+
+`BrailleSparkline` originally rendered any non-positive value — a real
+recorded tick with zero throughput, and a slot that hasn't been recorded
+yet — identically, as the fully-blank Braille character (U+2800, no dots
+raised). In practice a session is idle between generations far more
+often than it's actively streaming tokens, so most of a `live` row's
+sparkline was blank most of the time — visually indistinguishable from
+"this column doesn't work," which is exactly what it looked like after
+the `\r\n` fix stopped the layout from cascading and there was nothing
+left to blame but the chart itself.
+
+Fixed by distinguishing the two cases: a slot with no recorded sample yet
+(new session, or history not filled in that far back) still renders
+fully blank; a slot with a real recorded sample of 0 or less renders a
+single low dot instead. `last_n_padded` now pads with `nil` rather than
+`0` so the two are distinguishable at all — an idle *tracked* session now
+reads as a flat line, matching the "flat = idle" description this
+project already gives it, rather than as empty space.
+
 ## Unknown model handling
 
 A model absent from the pricing table renders cost as `?` with a warning

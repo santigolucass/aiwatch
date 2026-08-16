@@ -99,18 +99,20 @@ Press `q` or Ctrl-C to quit — both work instantly, no Enter needed. Each
 session gets its own color (stable for the life of the run, assigned in
 the order sessions first appear) and a small sparkline of its recent
 token throughput, so you can see multiple agents' activity at a glance —
-a flat line means idle, a filled one means it's actively working:
+a low flat baseline means idle, a filled one means it's actively working:
 
 ```
 $ aiwatch live
 aiwatch live — 19:08:57 — 1 active session(s) — press q to quit
 
-SESSION   PROJECT               MODEL(S)                       COST (USD)  TOKENS/s (40s)        LAST ACTIVITY
-b3f1a7c2  /home/dev/code/myapp  claude-sonnet-5,claude-opus-5     $7.5546  ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢰⡇  12h ago
+SESSION   PROJECT               MODEL(S)                  COST (USD)  TOKENS/s (80s)        LAST ACTIVITY
+b3f1a7c2  /home/dev/code/myapp  claude-sonnet-5,claude-…     $7.5546  ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⣠⣴⣿⣦⣀  just now
 ```
 
 (`b3f1a7c2` and its sparkline render in the same color; a second
-concurrent session would get a different one.)
+concurrent session would get a different one. `PROJECT` and `MODEL(S)`
+are truncated with `…` past a fixed width so a long path or a multi-model
+list can't push the row wider than the terminal and wrap.)
 
 The sparkline is self-normalized per session — it shows *that* session's
 own recent trend, not an absolute scale comparable across sessions. It's
@@ -119,6 +121,10 @@ purpose: Braille is Unicode "Neutral" width and reliably renders as one
 terminal column everywhere, unlike some symbols that render double-width
 in certain terminals and silently break column alignment (an earlier
 version of this view used `●` for an active marker and hit exactly that).
+A session that's been tracked for at least one tick but has zero
+throughput right now shows a low single-dot baseline rather than empty
+space, so it reads as "flat" instead of "not working" — a slot with no
+recorded sample yet (the session just showed up) stays truly blank.
 
 ```
 Options:
