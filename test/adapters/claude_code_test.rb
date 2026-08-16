@@ -68,6 +68,13 @@ class AdaptersClaudeCodeTest < Minitest::Test
     assert_equal "/home/testuser/code/demo-project", demo_session.project
   end
 
+  def test_title_is_the_last_ai_title_line_seen_not_the_first
+    # The fixture has two ai-title lines for this session; the later one
+    # ("Wire up billing...") must win, since Claude Code regenerates the
+    # title as the session progresses.
+    assert_equal "Wire up billing for demo project", demo_session.title
+  end
+
   def test_reports_provider_name
     assert_equal "claude-code", adapter.name
   end

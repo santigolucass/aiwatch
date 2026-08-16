@@ -19,8 +19,25 @@ so the parser streams line-by-line rather than loading a whole file.
 Each line has a `type` field. Observed values include `assistant`, `user`,
 `system`, `mode`, `permission-mode`, `ai-title`, `file-history-snapshot`,
 `file-history-delta`, `bridge-session`, `pr-link`, `queue-operation`, and
-others. **Only `type: "assistant"` lines carry token usage** — everything
-else is skipped.
+others. **Only `type: "assistant"` lines carry token usage.** `ai-title`
+lines carry the human-readable session name shown in `claude --resume`'s
+picker (see below); every other type is irrelevant to aiwatch and is
+skipped.
+
+### `ai-title` line shape
+
+```jsonc
+{"type": "ai-title", "aiTitle": "Fix the login bug", "sessionId": "4244444b-..."}
+```
+
+Repeated many times per session with the same value (like the streamed
+`assistant` duplicates), but can also appear more than once with a
+*different* `aiTitle` — Claude Code regenerates it as the session
+progresses. Since the file is append-only, the last one encountered
+while reading top-to-bottom is the most recent, and is what aiwatch
+keeps (`Session#set_title`). A session with no `ai-title` line at all
+(e.g. too short for one to have been generated) has `Session#title ==
+nil`.
 
 ## Assistant line shape (fields aiwatch reads)
 

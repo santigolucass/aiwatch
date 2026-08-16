@@ -70,6 +70,29 @@ class SessionTest < Minitest::Test
     assert_equal 7, session.daily_usages[[day2.getlocal.to_date, "claude-opus-5"]].input_tokens
   end
 
+  def test_title_defaults_to_nil_and_ignores_blank_or_non_string_updates
+    session = Aiwatch::Session.new(id: "sess-1", file_path: "/dev/null")
+    assert_nil session.title
+
+    session.set_title("")
+    assert_nil session.title
+
+    session.set_title(nil)
+    assert_nil session.title
+
+    session.set_title("Fix the login bug")
+    assert_equal "Fix the login bug", session.title
+  end
+
+  def test_set_title_last_call_wins
+    session = Aiwatch::Session.new(id: "sess-1", file_path: "/dev/null")
+
+    session.set_title("First draft title")
+    session.set_title("Final title")
+
+    assert_equal "Final title", session.title
+  end
+
   def test_short_id
     session = Aiwatch::Session.new(id: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", file_path: "/dev/null")
 

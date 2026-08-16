@@ -8,7 +8,7 @@ module Aiwatch
   # for `daily` rollups — a session's events can span more than one day.
   class Session
     attr_reader :id, :file_path, :model_usages, :daily_usages,
-      :first_seen_at, :last_seen_at, :skipped_lines
+      :first_seen_at, :last_seen_at, :skipped_lines, :title
 
     def initialize(id:, file_path:)
       @id = id
@@ -19,6 +19,15 @@ module Aiwatch
       @first_seen_at = nil
       @last_seen_at = nil
       @skipped_lines = 0
+      @title = nil
+    end
+
+    # Claude Code (re-)generates this as the session progresses — the same
+    # title shown in `claude --resume`'s picker — so the last one seen as
+    # the file is read top-to-bottom (chronological, since it's
+    # append-only) wins over any earlier one.
+    def set_title(title)
+      @title = title if title.is_a?(String) && !title.empty?
     end
 
     def add_event(event)

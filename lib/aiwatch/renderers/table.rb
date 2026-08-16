@@ -8,13 +8,14 @@ module Aiwatch
     # used a leading "●" column, which misaligned in terminals that render
     # that glyph as double-width (see docs/decisions.md).
     class Table
-      LIST_HEADERS = ["SESSION", "PROJECT", "MODEL(S)", "INPUT", "OUTPUT", "CACHE R/W", "COST (USD)", "LAST ACTIVITY"].freeze
-      LIST_ALIGN = [:left, :left, :left, :right, :right, :right, :right, :left].freeze
-      # PROJECT and MODEL(S) are the only unbounded columns (a real absolute
-      # path, or a comma list of models on a multi-model session); capped so
-      # a long value can't push the row wider than a normal terminal and
-      # wrap, which looks like broken alignment (see docs/decisions.md).
-      LIST_MAX_WIDTHS = [nil, 32, 24, nil, nil, nil, nil, nil].freeze
+      LIST_HEADERS = ["SESSION", "NAME", "PROJECT", "MODEL(S)", "INPUT", "OUTPUT", "CACHE R/W", "COST (USD)", "LAST ACTIVITY"].freeze
+      LIST_ALIGN = [:left, :left, :left, :left, :right, :right, :right, :right, :left].freeze
+      # NAME, PROJECT and MODEL(S) are the only unbounded columns (the
+      # AI-generated title, a real absolute path, or a comma list of
+      # models on a multi-model session); capped so a long value can't
+      # push the row wider than a normal terminal and wrap, which looks
+      # like broken alignment (see docs/decisions.md).
+      LIST_MAX_WIDTHS = [nil, 40, 32, 24, nil, nil, nil, nil, nil].freeze
 
       DAILY_HEADERS = ["DATE", "SESSIONS", "INPUT", "OUTPUT", "CACHE R/W", "COST (USD)"].freeze
       DAILY_ALIGN = [:left, :right, :right, :right, :right, :right].freeze
@@ -36,6 +37,7 @@ module Aiwatch
         total = @cost_calculator.total_for(session)
         lines = []
         lines << "Session:  #{session.id}"
+        lines << "Name:     #{session.title || "?"}"
         lines << "Project:  #{session.project || "?"}"
         lines << "Activity: #{Format.relative_time(session.first_seen_at, now: now)} -> #{Format.relative_time(session.last_seen_at, now: now)}"
         lines << "Cost:     #{Format.cost(total.amount, unknown: !total.fully_known?)}"
@@ -67,6 +69,7 @@ module Aiwatch
         active = session.active?(now: now, threshold_minutes: active_threshold_minutes)
         [
           session_id_cell(session, active, color),
+          session.title || "?",
           session.project || "?",
           session.models.join(","),
           Format.tokens(session.total_input_tokens),

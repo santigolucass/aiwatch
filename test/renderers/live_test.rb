@@ -437,6 +437,21 @@ class RenderersLiveTest < Minitest::Test
     end
   end
 
+  def test_session_name_appears_in_both_the_table_and_the_detail_panel
+    Tempfile.create("aiwatch-live-name") do |file|
+      File.utime(Time.now, Time.now, file.path)
+      session = build_session(file_path: file.path)
+      session.set_title("Fix the login bug")
+
+      out = run_events([session], [])
+
+      assert_includes out, "NAME"
+      assert_includes out, "Name:     Fix the login bug"
+      data_line = out.lines.reverse.find { |l| l.include?(session.short_id) }
+      assert_includes data_line, "Fix the login bug"
+    end
+  end
+
   def test_footer_lists_the_refresh_key
     out = run_events([], [])
 

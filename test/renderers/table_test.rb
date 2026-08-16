@@ -30,6 +30,19 @@ class RenderersTableTest < Minitest::Test
     assert_includes table, "$0.0020" # 1000*1e-6 + 500*2e-6
   end
 
+  def test_render_list_shows_the_session_name_or_a_question_mark_when_untitled
+    named = build_session(id: "1" * 8 + "-bbbb-cccc-dddd-eeeeeeeeeeee")
+    named.set_title("Fix the login bug")
+    untitled = build_session(id: "2" * 8 + "-bbbb-cccc-dddd-eeeeeeeeeeee")
+
+    table = Aiwatch::Renderers::Table.new(calculator).render_list([named, untitled])
+    lines = table.lines
+
+    assert_includes table, "NAME"
+    assert_includes lines.find { |l| l.include?("11111111") }, "Fix the login bug"
+    assert_includes lines.find { |l| l.include?("22222222") }, "?"
+  end
+
   def test_render_list_shows_question_mark_for_unknown_model_cost
     session = build_session(model: "totally-unknown")
     table = Aiwatch::Renderers::Table.new(calculator({})).render_list([session])
@@ -140,5 +153,22 @@ class RenderersTableTest < Minitest::Test
     assert_includes text, "claude-sonnet-5"
     assert_includes text, "mystery-model"
     assert_includes text, "Warning: no pricing data for: mystery-model"
+  end
+
+  def test_render_show_includes_the_session_name
+    session = build_session
+    session.set_title("Investigate flaky test")
+
+    text = Aiwatch::Renderers::Table.new(calculator).render_show(session)
+
+    assert_includes text, "Name:     Investigate flaky test"
+  end
+
+  def test_render_show_shows_a_question_mark_when_untitled
+    session = build_session
+
+    text = Aiwatch::Renderers::Table.new(calculator).render_show(session)
+
+    assert_includes text, "Name:     ?"
   end
 end

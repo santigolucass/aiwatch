@@ -43,14 +43,16 @@ Recent sessions, sorted by last activity.
 
 ```
 $ aiwatch list --all
-SESSION   PROJECT                   MODEL(S)                       INPUT  OUTPUT  CACHE R/W  COST (USD)  LAST ACTIVITY
-b3f1a7c2  /home/dev/code/myapp      claude-sonnet-5,claude-opus-5    195   16.7K  1.6M/1.4M     $6.9205  12h ago
-e9c4d8a1  /home/dev/code/docs-site  claude-sonnet-5                   60    3.1K   90K/200K     $0.8491  2d ago
+SESSION   NAME                         PROJECT                   MODEL(S)                  INPUT  OUTPUT  CACHE R/W  COST (USD)  LAST ACTIVITY
+b3f1a7c2  Fix flaky checkout test      /home/dev/code/myapp      claude-sonnet-5,claude-…    195   16.7K  1.6M/1.4M     $6.3180  5h ago
+e9c4d8a1  Rewrite the onboarding docs  /home/dev/code/docs-site  claude-sonnet-5              60    3.1K   90K/200K     $0.5491  2d ago
 ```
 
-A session's id is shown in green (on a TTY) when its log file was modified
-in the last 5 minutes — i.e. it's active (configurable with
-`--active-minutes`).
+`NAME` is the same AI-generated title `claude --resume`'s picker shows —
+read from the session log, not computed by aiwatch — and renders as `?`
+for a session too new to have one yet. A session's id is shown in green
+(on a TTY) when its log file was modified in the last 5 minutes — i.e.
+it's active (configurable with `--active-minutes`).
 
 ```
 Options:
@@ -81,13 +83,14 @@ prefix, like `git show`.
 ```
 $ aiwatch show b3f1a7c2
 Session:  b3f1a7c2-4e6d-4a9b-8f21-7d5c9e2a11f0
+Name:     Fix flaky checkout test
 Project:  /home/dev/code/myapp
 Activity: 6h ago -> 5h ago
-Cost:     $6.9205
+Cost:     $6.3180
 
 MODEL            INPUT  OUTPUT  CACHE READ  CACHE CREATE  COST (USD)
-claude-sonnet-5    165   14.5K        1.4M          1.2M     $5.2653
-claude-opus-5       30    2.2K        200K          150K     $1.6552
+claude-sonnet-5    165   14.5K        1.4M          1.2M     $5.2253
+claude-opus-5       30    2.2K        200K          150K     $1.0926
 ```
 
 An ambiguous prefix lists the matching session ids instead of guessing.
@@ -110,6 +113,7 @@ $ aiwatch live
 aiwatch live — 19:08:57 — 2 active session(s)
 
 Session:  b3f1a7c2-4e6d-4a9b-8f21-7d5c9e2a11f0
+Name:     Fix flaky checkout test
 Project:  /home/dev/code/myapp
 Activity: just now -> just now
 Cost:     $0.2359
@@ -118,19 +122,19 @@ MODEL            INPUT  OUTPUT  CACHE READ  CACHE CREATE  COST (USD)
 claude-sonnet-5    165     18K           0             0     $0.1807
 claude-opus-5       30    2.2K           0             0     $0.0552
 
-   SESSION   PROJECT                   MODEL(S)                  COST (USD)  TOKENS/s (80s)        LAST ACTIVITY
->  b3f1a7c2  /home/dev/code/myapp      claude-sonnet-5,claude-…     $0.2359  ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣀⣤⣾⣷⣄  just now
-   e9c4d8a1  /home/dev/code/docs-site  claude-sonnet-5              $0.0311  ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣀⣀⣀⣀⣀  just now
+   SESSION   NAME                         PROJECT                   MODEL(S)                  COST (USD)  TOKENS/s (80s)        LAST ACTIVITY
+>  b3f1a7c2  Fix flaky checkout test      /home/dev/code/myapp      claude-sonnet-5,claude-…     $0.2359  ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣀⣤⣾⣷⣄  just now
+   e9c4d8a1  Rewrite the onboarding docs  /home/dev/code/docs-site  claude-sonnet-5              $0.0311  ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣀⣀⣀⣀⣀  just now
 
 ↑/↓ select session   x kill selected session   r refresh   q quit
 ```
 
 (`b3f1a7c2` — the selected row, marked `>` — and its sparkline render in
-the same color; `e9c4d8a1` gets a different one. `PROJECT` and
-`MODEL(S)` are truncated with `…` past a fixed width so a long path or a
-multi-model list can't push the row wider than the terminal and wrap.
-The selection cursor is a plain `>`, not a Unicode glyph, for the same
-reason the sparkline uses Braille and not block characters — see below.)
+the same color; `e9c4d8a1` gets a different one. `NAME`, `PROJECT` and
+`MODEL(S)` are truncated with `…` past a fixed width so a long value
+can't push the row wider than the terminal and wrap. The selection
+cursor is a plain `>`, not a Unicode glyph, for the same reason the
+sparkline uses Braille and not block characters — see below.)
 
 Pressing `x` replaces the footer with a confirmation prompt
 (`Kill session b3f1a7c2? y = confirm, n/Esc = cancel`) before anything
@@ -174,6 +178,7 @@ won't change shape without a version bump.
 ```json
 {
   "session_id": "b3f1a7c2-4e6d-4a9b-8f21-7d5c9e2a11f0",
+  "name": "Fix flaky checkout test",
   "project": "/home/dev/code/myapp",
   "models": ["claude-sonnet-5", "claude-opus-5"],
   "input_tokens": 195,
@@ -196,6 +201,8 @@ fully_known}`.
 by an array of per-model breakdowns (`{model, input_tokens, output_tokens,
 cache_read_tokens, cache_creation_tokens, cost_usd}`), plus an
 `unknown_models` array.
+
+`name` is `null` for a session too new to have an AI-generated title yet.
 
 `fully_known: false` (or a model's `cost_usd: null`) means at least one
 model in that row had no pricing data — the total still sums whatever

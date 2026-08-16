@@ -20,8 +20,8 @@ module Aiwatch
       REFRESH_SECONDS = 2
       SPARKLINE_WIDTH = 20 # Braille characters; each holds 2 samples
       PALETTE = [32, 36, 33, 35, 34, 31].freeze # green, cyan, yellow, magenta, blue, red
-      # cursor, SESSION, PROJECT, MODEL(S), COST (USD), TOKENS/s, LAST ACTIVITY
-      COLUMN_MAX_WIDTHS = [nil, nil, 28, 24, nil, nil, nil].freeze
+      # cursor, SESSION, NAME, PROJECT, MODEL(S), COST (USD), TOKENS/s, LAST ACTIVITY
+      COLUMN_MAX_WIDTHS = [nil, nil, 32, 28, 24, nil, nil, nil].freeze
 
       KEY_EVENTS = {
         "q" => :quit, "\u0003" => :quit,
@@ -223,9 +223,9 @@ module Aiwatch
 
       def session_table(now)
         color = @out.respond_to?(:tty?) && @out.tty?
-        headers = ["", "SESSION", "PROJECT", "MODEL(S)", "COST (USD)", "TOKENS/s (#{window_label})", "LAST ACTIVITY"]
+        headers = ["", "SESSION", "NAME", "PROJECT", "MODEL(S)", "COST (USD)", "TOKENS/s (#{window_label})", "LAST ACTIVITY"]
         rows = @sessions.map { |s| session_row(s, now, color) }
-        aligns = [:left, :left, :left, :left, :right, :left, :left]
+        aligns = [:left, :left, :left, :left, :left, :right, :left, :left]
         TextTable.render(headers, rows, aligns, max_widths: COLUMN_MAX_WIDTHS)
       end
 
@@ -236,6 +236,7 @@ module Aiwatch
         [
           (session.id == @selected_id) ? ">" : " ",
           colorize(session.short_id, ansi, color, bold: true),
+          session.title || "?",
           session.project || "?",
           session.models.join(","),
           Format.cost(total.amount, unknown: !total.fully_known?),

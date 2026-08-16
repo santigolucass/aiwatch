@@ -46,6 +46,7 @@ module Aiwatch
         total = @cost_calculator.total_for(session)
         {
           session_id: session.id,
+          name: session.title,
           project: session.project,
           models: session.models,
           input_tokens: session.total_input_tokens,

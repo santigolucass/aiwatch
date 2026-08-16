@@ -208,6 +208,20 @@ frame rather than waiting for the regular interval. `r` also refreshes
 on demand, for the same reason a new session showing up shouldn't need
 waiting out the interval either.
 
+## Session names come from `ai-title` lines, last one wins
+
+`claude --resume`'s picker shows a human-readable title per session
+instead of a bare uuid; that title lives in the log as its own line type
+(`{"type": "ai-title", "aiTitle": "...", "sessionId": "..."}`), not on
+the `assistant` lines aiwatch already parsed. It's regenerated as the
+session progresses — one real session had two distinct `aiTitle` values —
+so `Session#set_title` unconditionally overwrites on every `ai-title`
+line seen, and since the file is append-only (read top-to-bottom in
+chronological order), the last one encountered is the most recent one,
+with no separate ordering logic needed. A session with none yet renders
+as `?`, the same convention as an unknown model's cost or a missing
+project.
+
 ## Unknown model handling
 
 A model absent from the pricing table renders cost as `?` with a warning

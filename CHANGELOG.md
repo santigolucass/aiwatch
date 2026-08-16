@@ -10,7 +10,9 @@ Initial release. Claude Code only.
 ### Added
 
 - `aiwatch list` — recent sessions, sorted by last activity, with
-  `--since`/`--all` and `--json`.
+  `--since`/`--all` and `--json`. Shows each session's AI-generated name
+  (the same title `claude --resume`'s picker shows), read straight from
+  the log.
 - `aiwatch daily` — tokens and cost aggregated per local calendar day.
 - `aiwatch show <id>` — per-model breakdown for one session, resolved by a
   git-style unique id prefix.

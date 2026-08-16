@@ -46,6 +46,11 @@ module Aiwatch
             next
           end
 
+          if obj["type"] == "ai-title"
+            session.set_title(obj["aiTitle"])
+            next
+          end
+
           event = UsageEvent.from_line(obj)
           next if event.nil?
           next if seen_message_ids.key?(event.message_id)

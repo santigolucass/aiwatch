@@ -24,6 +24,7 @@ class RenderersJsonTest < Minitest::Test
     assert_equal 1, parsed.length
     row = parsed.first
     assert_equal session.id, row["session_id"]
+    assert_nil row["name"]
     assert_equal "/home/x/project", row["project"]
     assert_equal ["claude-sonnet-5"], row["models"]
     assert_equal 1000, row["input_tokens"]
@@ -32,6 +33,14 @@ class RenderersJsonTest < Minitest::Test
     assert_equal true, row["fully_known"]
     assert row.key?("last_activity")
     assert row.key?("active")
+  end
+
+  def test_render_list_includes_the_session_name_when_present
+    session = build_session
+    session.set_title("Fix the login bug")
+    row = JSON.parse(Aiwatch::Renderers::Json.new(calculator).render_list([session])).first
+
+    assert_equal "Fix the login bug", row["name"]
   end
 
   def test_render_list_reports_unknown_models_as_not_fully_known
