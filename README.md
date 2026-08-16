@@ -98,8 +98,9 @@ Interactive, auto-refreshing view of currently active sessions (default:
 every 2s) — an `htop` for your agents. `↑`/`↓` move a selection cursor
 between sessions and expand a detail panel above the table for whichever
 one is selected; `x` asks for confirmation, then sends `SIGTERM` to the
-process behind that session; `q` or Ctrl-C quits. All of these act
-instantly, no Enter needed. Each session also gets its own color (stable
+process behind that session; `r` refreshes on demand; `q` or Ctrl-C
+quits. All of these act instantly, no Enter needed. Each session also
+gets its own color (stable
 for the life of the run, assigned in the order sessions first appear)
 and a small sparkline of its recent token throughput — a low flat
 baseline means idle, a filled one means it's actively working:
@@ -121,7 +122,7 @@ claude-opus-5       30    2.2K           0             0     $0.0552
 >  b3f1a7c2  /home/dev/code/myapp      claude-sonnet-5,claude-…     $0.2359  ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣀⣤⣾⣷⣄  just now
    e9c4d8a1  /home/dev/code/docs-site  claude-sonnet-5              $0.0311  ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣀⣀⣀⣀⣀  just now
 
-↑/↓ select session   x kill selected session   q quit
+↑/↓ select session   x kill selected session   r refresh   q quit
 ```
 
 (`b3f1a7c2` — the selected row, marked `>` — and its sparkline render in
@@ -139,7 +140,9 @@ mid-task, so it never fires on a single accidental keypress. Finding
 current working directory (`/proc/PID/cwd`) against the session's
 project, so this only works on Linux; on other platforms, or if more
 than one process matches, `live` reports "could not find a running
-process" instead of guessing.
+process" instead of guessing. A killed session disappears from the list
+on the next refresh — including the immediate one `live` triggers right
+after the kill, so you don't have to wait or press `r` yourself.
 
 The sparkline is self-normalized per session — it shows *that* session's
 own recent trend, not an absolute scale comparable across sessions. It's

@@ -387,4 +387,59 @@ class RenderersLiveTest < Minitest::Test
       assert_includes out, "Could not find a running process for session #{session.short_id}"
     end
   end
+
+  # active? is based on the log file's mtime, which sending a signal
+  # never touches — a killed session would otherwise keep showing as
+  # active until that mtime naturally goes stale (active_threshold_minutes,
+  # up to several minutes by default).
+  def test_killing_a_session_removes_it_from_the_list_immediately
+    Tempfile.create("aiwatch-live-kill-remove") do |file|
+      File.utime(Time.now, Time.now, file.path)
+      session = build_session(file_path: file.path)
+
+      out = run_events(
+        [session], [:kill, :confirm],
+        process_finder: ->(_path) { 4242 }, killer: ->(_pid, _sig) {}
+      )
+      last_frame = out.split("\e[H\e[2J").last
+
+      assert_includes last_frame, "0 active session(s)"
+      assert_includes last_frame, "(no active sessions)"
+    end
+  end
+
+  # --- Manual refresh ---
+
+  class AppearingFakeAdapter
+    def initialize(sequence)
+      @sequence = sequence
+      @call_index = 0
+    end
+
+    def discover_sessions
+      result = @sequence[@call_index] || @sequence.last
+      @call_index += 1
+      result
+    end
+  end
+
+  def test_r_immediately_refreshes_without_waiting_for_the_timeout
+    Tempfile.create("aiwatch-live-refresh") do |file|
+      File.utime(Time.now, Time.now, file.path)
+      session = build_session(file_path: file.path)
+      adapter = AppearingFakeAdapter.new([[], [session]])
+
+      out = run_with(adapter: adapter, events: [:refresh])
+      last_frame = out.split("\e[H\e[2J").last
+
+      assert_includes last_frame, "1 active session(s)"
+      assert_includes last_frame, session.short_id
+    end
+  end
+
+  def test_footer_lists_the_refresh_key
+    out = run_events([], [])
+
+    assert_includes out, "r refresh"
+  end
 end

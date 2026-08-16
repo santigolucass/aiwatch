@@ -173,6 +173,20 @@ than one* process matches (e.g. two terminals open in the same
 project) — sending a signal to the wrong process is worse than not
 finding one.
 
+## A killed session is suppressed locally, not re-derived from the file
+
+`Session#active?` is based on the log file's mtime; sending a signal to
+the process doesn't touch that file, so a killed session would otherwise
+keep showing as active until the mtime naturally goes stale
+(`active_threshold_minutes`, several minutes by default) — refreshing
+after a kill wouldn't be enough on its own to make it disappear. `live`
+tracks killed session ids for the life of the run and filters them out
+of every subsequent refresh regardless of file mtime, and refreshes
+immediately after a kill attempt so this takes effect on the very next
+frame rather than waiting for the regular interval. `r` also refreshes
+on demand, for the same reason a new session showing up shouldn't need
+waiting out the interval either.
+
 ## Unknown model handling
 
 A model absent from the pricing table renders cost as `?` with a warning

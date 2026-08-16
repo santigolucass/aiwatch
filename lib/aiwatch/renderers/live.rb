@@ -13,9 +13,9 @@ module Aiwatch
     # life of the run, assigned in first-seen order from a small palette.
     #
     # Puts the terminal into raw mode so single keystrokes (arrows, x,
-    # y/n, q, Ctrl-C) act instantly without waiting for Enter, and always
-    # restores the terminal on the way out — including on an unhandled
-    # exception.
+    # y/n, r, q, Ctrl-C) act instantly without waiting for Enter, and
+    # always restores the terminal on the way out — including on an
+    # unhandled exception.
     class Live
       REFRESH_SECONDS = 2
       SPARKLINE_WIDTH = 20 # Braille characters; each holds 2 samples
@@ -27,7 +27,8 @@ module Aiwatch
         "q" => :quit, "\u0003" => :quit,
         "x" => :kill, "X" => :kill,
         "y" => :confirm, "Y" => :confirm,
-        "n" => :cancel, "N" => :cancel
+        "n" => :cancel, "N" => :cancel,
+        "r" => :refresh, "R" => :refresh
       }.freeze
 
       def initialize(adapter:, cost_calculator:, out: $stdout, in_stream: $stdin,
@@ -55,6 +56,7 @@ module Aiwatch
         @mode = :browse
         @pending_kill_id = nil
         @status_message = nil
+        @killed_ids = {}
       end
 
       def run
@@ -66,9 +68,9 @@ module Aiwatch
           event = @read_event.call(@refresh_seconds)
           now = @clock.call
           case event
-          when :timeout then refresh(now)
+          when :timeout, :refresh then refresh(now)
           when :quit then break
-          else apply_event(event)
+          else apply_event(event, now)
           end
           render_once(now)
         end
@@ -92,10 +94,10 @@ module Aiwatch
         end
       end
 
-      def apply_event(event)
+      def apply_event(event, now)
         if @mode == :confirm_kill
           case event
-          when :confirm then confirm_kill
+          when :confirm then confirm_kill(now)
           when :cancel then cancel_kill
           end
           return
@@ -128,7 +130,7 @@ module Aiwatch
         @mode = :browse
       end
 
-      def confirm_kill
+      def confirm_kill(now)
         session = @sessions.find { |s| s.id == @pending_kill_id }
         @mode = :browse
         @pending_kill_id = nil
@@ -137,12 +139,19 @@ module Aiwatch
         pid = session.project && @process_finder.call(session.project)
         if pid
           @killer.call(pid, "TERM")
+          # active? is based on the log file's mtime, which killing the
+          # process doesn't touch — it would otherwise keep showing as
+          # active until that naturally expires (active_threshold_minutes,
+          # up to several minutes). Suppress it locally instead.
+          @killed_ids[session.id] = true
           @status_message = "Sent SIGTERM to process #{pid} (session #{session.short_id})."
         else
           @status_message = "Could not find a running process for session #{session.short_id}."
         end
+        refresh(now)
       rescue Errno::ESRCH
         @status_message = "Process for session #{session.short_id} was already gone."
+        refresh(now)
       end
 
       def render_once(now)
@@ -169,7 +178,7 @@ module Aiwatch
       def footer
         return "Kill session #{pending_kill_short_id}? y = confirm, n/Esc = cancel" if @mode == :confirm_kill
 
-        @status_message || "↑/↓ select session   x kill selected session   q quit"
+        @status_message || "↑/↓ select session   x kill selected session   r refresh   q quit"
       end
 
       def pending_kill_short_id
@@ -189,7 +198,7 @@ module Aiwatch
 
       def active_sessions(now)
         sessions = @adapter.discover_sessions.select do |s|
-          s.active?(now: now, threshold_minutes: @active_threshold_minutes)
+          s.active?(now: now, threshold_minutes: @active_threshold_minutes) && !@killed_ids.key?(s.id)
         end
         sessions.sort_by { |s| s.last_seen_at || Time.at(0) }.reverse
       end
