@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-require "json"
+require_relative "line_folder"
 
 module Aiwatch
   module Adapters
@@ -24,11 +24,13 @@ module Aiwatch
         session_files.filter_map { |path| parse_file(path) }.reject(&:empty?)
       end
 
-      private
-
+      # Public so SessionStore (the live dashboard's incremental index)
+      # can discover the same files without duplicating the glob pattern.
       def session_files
         Dir.glob(File.join(@dir, "*", "*.jsonl"))
       end
+
+      private
 
       def parse_file(path)
         id = File.basename(path, ".jsonl")
@@ -36,27 +38,7 @@ module Aiwatch
         seen_message_ids = {}
 
         File.foreach(path, encoding: "UTF-8") do |line|
-          line.strip!
-          next if line.empty?
-
-          obj = begin
-            JSON.parse(line)
-          rescue
-            session.note_skipped_line
-            next
-          end
-
-          if obj["type"] == "ai-title"
-            session.set_title(obj["aiTitle"])
-            next
-          end
-
-          event = UsageEvent.from_line(obj)
-          next if event.nil?
-          next if seen_message_ids.key?(event.message_id)
-
-          seen_message_ids[event.message_id] = true
-          session.add_event(event)
+          LineFolder.fold(session, seen_message_ids, line)
         end
 
         session
