@@ -50,4 +50,23 @@ class CommandsLiveTest < Minitest::Test
     assert_equal 10, FakeLive.last_args[:active_threshold_minutes]
     assert_in_delta 0.5, FakeLive.last_args[:refresh_seconds], 1e-9
   end
+
+  def test_no_proc_flag_replaces_process_finder_all_and_proc_stats
+    command = Aiwatch::Commands::Live.new(
+      ["--no-proc"], adapter: FakeAdapter.new, pricing_table: FakePricingTable.new(PRICE), live_class: FakeLive
+    )
+    command.run
+
+    assert_equal [], FakeLive.last_args[:process_finder_all].call
+    refute_nil FakeLive.last_args[:proc_stats]
+  end
+
+  def test_proc_scanning_is_on_by_default
+    command = Aiwatch::Commands::Live.new(
+      [], adapter: FakeAdapter.new, pricing_table: FakePricingTable.new(PRICE), live_class: FakeLive
+    )
+    command.run
+
+    refute FakeLive.last_args.key?(:process_finder_all)
+  end
 end

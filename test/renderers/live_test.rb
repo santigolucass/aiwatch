@@ -1,460 +1,227 @@
 # frozen_string_literal: true
 
 require_relative "../test_helper"
+require_relative "../support/frame"
 require "stringio"
-require "tempfile"
+require "tmpdir"
+require "fileutils"
+require "json"
 
+# End-to-end tests for the ctop-style dashboard (Aiwatch::Live::App, via
+# the Renderers::Live facade). Unlike the old single-view `live`, the
+# dashboard reads real session files on disk (SessionStore tails them
+# incrementally) rather than an in-memory adapter double, so every test
+# here builds real fixture JSONL files under a tempdir.
 class RenderersLiveTest < Minitest::Test
-  include SessionFactory
-
   PRICE = {
-    "claude-sonnet-5" => {"input_cost_per_token" => 1e-6, "output_cost_per_token" => 0}
+    "claude-sonnet-5" => {"input_cost_per_token" => 1e-6, "output_cost_per_token" => 0, "max_input_tokens" => 200_000}
   }.freeze
 
-  class FakeAdapter
-    def initialize(sessions)
-      @sessions = sessions
+  class CountingStore
+    attr_reader :call_count
+
+    def initialize(inner)
+      @inner = inner
+      @call_count = 0
     end
 
-    def discover_sessions
-      @sessions
-    end
-  end
-
-  # Returns a fresh single-session snapshot each call, with output_tokens
-  # taken from `totals_sequence` in order — simulates a session's usage
-  # growing tick over tick.
-  class GrowingFakeAdapter
-    def initialize(totals_sequence, id:, file_path:)
-      @totals_sequence = totals_sequence
-      @id = id
-      @file_path = file_path
-      @call_index = 0
-    end
-
-    def discover_sessions
-      output = @totals_sequence[@call_index] || @totals_sequence.last
-      @call_index += 1
-      session = Aiwatch::Session.new(id: @id, file_path: @file_path)
-      session.add_event(Aiwatch::UsageEvent.new(
-        message_id: "m-#{@call_index}", model: "claude-sonnet-5", timestamp: Time.now, cwd: "/x",
-        input_tokens: 0, output_tokens: output, cache_creation_input_tokens: 0,
-        cache_read_input_tokens: 0, cache_creation_1h_tokens: 0, cache_creation_5m_tokens: 0
-      ))
-      [session]
+    def refresh(priority_id: nil)
+      @call_count += 1
+      @inner.refresh(priority_id: priority_id)
     end
   end
 
-  # A minimal IO-like object that reports as a TTY, so color-dependent
-  # rendering (never exercised by plain StringIO, which is how a real
-  # alignment bug went uncaught before) actually runs under test.
-  class FakeTTY
-    def initialize
-      @io = StringIO.new
-    end
-
-    def tty?
-      true
-    end
-
-    def print(*args)
-      @io.print(*args)
-    end
-
-    def puts(*args)
-      @io.puts(*args)
-    end
-
-    def flush
-    end
-
-    def string
-      @io.string
+  def with_project_dir
+    Dir.mktmpdir do |dir|
+      proj = File.join(dir, "-home-x-proj")
+      FileUtils.mkdir_p(proj)
+      yield dir, proj
     end
   end
 
-  def calculator
-    Aiwatch::CostCalculator.new(FakePricingTable.new(PRICE))
+  def assistant_line(id, tokens, ts)
+    {
+      "type" => "assistant", "timestamp" => ts, "cwd" => "/home/x/proj",
+      "message" => {"id" => id, "model" => "claude-sonnet-5", "usage" => {"input_tokens" => 1, "output_tokens" => tokens}}
+    }.to_json
   end
 
-  # Runs `live` feeding it exactly `events` in order (each a read_event
-  # return value — :timeout, :up, :down, :kill, :confirm, :cancel), then
-  # :quit once the queue is exhausted. One render happens before the loop
-  # even starts, so events.length + 1 renders happen for an all-:timeout
-  # queue (each :timeout also triggers a real data refresh).
-  def run_with(adapter:, events:, out: StringIO.new, **opts)
-    queue = events.dup
-    read_event = ->(_timeout) { queue.empty? ? :quit : queue.shift }
+  def write_session(proj, id: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", title: "Fix the bug", tokens: 100, ts: nil)
+    ts ||= Time.now.utc.strftime("%Y-%m-%dT%H:%M:%S.000Z")
+    path = File.join(proj, "#{id}.jsonl")
+    lines = [{"type" => "ai-title", "aiTitle" => title}.to_json, assistant_line("m-#{id}", tokens, ts)]
+    File.write(path, lines.join("\n") + "\n")
+    path
+  end
 
-    live = Aiwatch::Renderers::Live.new(
-      adapter: adapter, cost_calculator: calculator, out: out, in_stream: StringIO.new,
-      read_event: read_event, **opts
+  # A process_finder_all seam matching exactly one live process to the
+  # given session file — the session reads as ACTIVE (not dead) and thus
+  # killable, the same as a real running `claude` process would.
+  def live_process_match(path, pid: 555)
+    slug = File.basename(File.dirname(path))
+    -> { [{pid: pid, cwd: "/home/x/proj", slug: slug, cmdline: %w[claude]}] }
+  end
+
+  def build_app(dir, keys:, out: StringIO.new, size: [100, 30], now: Time.now,
+    store: nil, process_finder_all: -> { [] }, process_finder: ->(*) {},
+    git_branch: ->(*) {}, killer: ->(*) {})
+    store ||= Aiwatch::SessionStore.new(adapter: Aiwatch::Adapters::ClaudeCode.new(dir: dir))
+    cost_calculator = Aiwatch::CostCalculator.new(FakePricingTable.new(PRICE))
+    screen = Aiwatch::Tui::Screen.new(out: out, in_stream: StringIO.new, size_reader: -> { size }, diff: false, altscreen: false)
+    theme = Aiwatch::Tui::Theme.new(depth: :none)
+    pricing_table = FakePricingTable.new(PRICE)
+
+    Aiwatch::Renderers::Live.new(
+      store: store, cost_calculator: cost_calculator, pricing_table: pricing_table,
+      screen: screen, theme: theme, active_threshold_minutes: 5, refresh_seconds: 0,
+      clock: -> { now }, read_key: Aiwatch::Live::Input::Scripted.new(keys),
+      process_finder_all: process_finder_all, git_branch: git_branch,
+      proc_stats: Aiwatch::ProcStats.new(proc_root: "/nonexistent-proc-root"),
+      killer: killer, process_finder: process_finder
     )
-    live.run
-    out.respond_to?(:string) ? out.string : out
   end
 
-  def run_events(sessions, events, **opts)
-    run_with(adapter: FakeAdapter.new(sessions), events: events, **opts)
+  def run_app(dir, keys:, out: StringIO.new, **opts)
+    build_app(dir, keys: keys, out: out, **opts).run
+    out.string
   end
 
-  def test_renders_only_active_sessions
-    Tempfile.create("aiwatch-live-active") do |active_file|
-      Tempfile.create("aiwatch-live-stale") do |stale_file|
-        File.utime(Time.now, Time.now, active_file.path)
-        File.utime(Time.now - 3600, Time.now - 3600, stale_file.path)
+  def test_shows_a_placeholder_style_table_when_nothing_is_active
+    with_project_dir do |dir, _proj|
+      frame = Frame.new(run_app(dir, keys: []))
+      assert frame.row_containing("0 total")
+    end
+  end
 
-        active = build_session(id: "11111111-bbbb-cccc-dddd-eeeeeeeeeeee", file_path: active_file.path)
-        stale = build_session(id: "22222222-bbbb-cccc-dddd-eeeeeeeeeeee", file_path: stale_file.path)
+  def test_renders_a_discovered_session_in_the_table
+    with_project_dir do |dir, proj|
+      write_session(proj, title: "Fix the bug")
+      frame = Frame.new(run_app(dir, keys: []))
+      row = frame.row_containing("Fix the bug")
+      refute_nil row
+      assert_includes row.plain, "DEAD" # no live process matched -> dead, not gone
+    end
+  end
 
-        out = run_events([active, stale], [])
-
-        assert_includes out, "11111111"
-        refute_includes out, "22222222"
-        assert_includes out, "1 active session(s)"
+  def test_no_rendered_row_exceeds_the_terminal_width
+    with_project_dir do |dir, proj|
+      write_session(proj, title: "A very very very extremely long session title that should never overflow the terminal width")
+      [60, 80, 100, 140, 200].each do |width|
+        frame = Frame.new(run_app(dir, keys: [], size: [width, 30]))
+        frame.each_row { |row| assert_operator row.plain.length, :<=, width, "row #{row.number} overflowed at width #{width}" }
       end
     end
   end
 
-  def test_shows_placeholder_when_nothing_is_active
-    out = run_events([], [])
+  def test_down_then_up_arrow_moves_selection
+    with_project_dir do |dir, proj|
+      write_session(proj, id: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", title: "First", ts: Time.now.utc.strftime("%Y-%m-%dT%H:%M:%S.000Z"))
+      write_session(proj, id: "bbbbbbbb-bbbb-cccc-dddd-eeeeeeeeeeee", title: "Second", ts: (Time.now.utc - 1).strftime("%Y-%m-%dT%H:%M:%S.000Z"))
 
-    assert_includes out, "0 active session(s)"
-    assert_includes out, "(no active sessions)"
+      frames = Frame.frames(run_app(dir, keys: [:down, :up], size: [140, 30]))
+      assert_includes frames[0].row_containing("First").plain, ">"
+      assert_includes frames[1].row_containing("Second").plain, ">"
+      assert_includes frames[2].row_containing("First").plain, ">"
+    end
   end
 
-  def test_refreshes_once_per_timeout_until_quit
-    out = run_events([], [:timeout, :timeout])
+  def test_x_shows_a_confirmation_prompt_without_killing_yet
+    with_project_dir do |dir, proj|
+      path = write_session(proj)
+      killed = false
+      output = run_app(dir, keys: ["x"], process_finder_all: live_process_match(path), killer: ->(*) { killed = true })
+      frame = Frame.frames(output).last
+      assert frame.row_containing("y = confirm")
+      refute killed
+    end
+  end
 
-    assert_equal 3, out.scan("\e[H\e[2J").length
+  def test_y_confirms_the_kill_and_calls_the_killer
+    with_project_dir do |dir, proj|
+      path = write_session(proj)
+      killed_with = nil
+      run_app(dir, keys: ["x", "y"], process_finder_all: live_process_match(path),
+        process_finder: ->(*) { 4242 }, killer: ->(pid, sig) { killed_with = [pid, sig] })
+      assert_equal [4242, "TERM"], killed_with
+    end
+  end
+
+  def test_n_cancels_the_kill_without_calling_the_killer
+    with_project_dir do |dir, proj|
+      path = write_session(proj)
+      killed = false
+      output = run_app(dir, keys: ["x", "n"], process_finder_all: live_process_match(path), killer: ->(*) { killed = true })
+      refute killed
+      frame = Frame.frames(output).last
+      refute frame.row_containing("y = confirm")
+    end
+  end
+
+  def test_kill_reports_when_no_process_is_found
+    with_project_dir do |dir, proj|
+      path = write_session(proj)
+      output = run_app(dir, keys: ["x", "y"], process_finder_all: live_process_match(path), process_finder: ->(*) {})
+      frame = Frame.frames(output).last
+      assert frame.row_containing("Could not find a running process")
+    end
+  end
+
+  def test_r_forces_a_refresh_via_the_same_path_as_a_timeout
+    with_project_dir do |dir, proj|
+      write_session(proj)
+      inner = Aiwatch::SessionStore.new(adapter: Aiwatch::Adapters::ClaudeCode.new(dir: dir))
+      counting = CountingStore.new(inner)
+      run_app(dir, keys: ["1", "r"], store: counting) # "1" is an unmapped no-op key
+      # one call on startup, one more for the explicit "r" refresh
+      assert_equal 2, counting.call_count
+    end
   end
 
   def test_restores_the_terminal_on_quit
-    out = run_events([], [])
-
-    assert_includes out, "\e[?25h"
-  end
-
-  def test_restores_the_terminal_even_if_rendering_raises
-    out = StringIO.new
-    adapter = Object.new
-    def adapter.discover_sessions
-      raise "boom"
-    end
-
-    live = Aiwatch::Renderers::Live.new(
-      adapter: adapter, cost_calculator: calculator,
-      out: out, in_stream: StringIO.new, read_event: ->(_) { :quit }
-    )
-
-    assert_raises(RuntimeError) { live.run }
-    assert_includes out.string, "\e[?25h"
-  end
-
-  def test_tokens_header_shows_the_actual_history_window
-    Tempfile.create("aiwatch-live-header") do |file|
-      File.utime(Time.now, Time.now, file.path)
-      session = build_session(file_path: file.path)
-
-      out = run_events([session], [])
-
-      # sparkline_width defaults to 20 (40 samples) at the default 2s
-      # refresh => 80s of history.
-      assert_includes out, "TOKENS/s (80s)"
+    with_project_dir do |dir, _proj|
+      out = StringIO.new
+      run_app(dir, keys: [], out: out)
+      assert_includes out.string, "\e[?25h"
     end
   end
 
-  def test_custom_sparkline_width_and_refresh_change_the_window_label
-    Tempfile.create("aiwatch-live-header2") do |file|
-      File.utime(Time.now, Time.now, file.path)
-      session = build_session(file_path: file.path)
-
-      out = run_events([session], [], sparkline_width: 4, refresh_seconds: 2)
-
-      assert_includes out, "TOKENS/s (16s)"
+  def test_restores_the_terminal_even_if_a_key_handler_raises
+    with_project_dir do |dir, proj|
+      path = write_session(proj)
+      out = StringIO.new
+      app = build_app(dir, keys: ["x", "y"], out: out, process_finder_all: live_process_match(path), process_finder: ->(*) { raise "boom" })
+      assert_raises(RuntimeError) { app.run }
+      assert_includes out.string, "\e[?25h"
     end
   end
 
-  def test_sparkline_reflects_token_growth_across_ticks
-    Tempfile.create("aiwatch-live-growth") do |file|
-      File.utime(Time.now, Time.now, file.path)
-      adapter = GrowingFakeAdapter.new([0, 50, 120], id: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", file_path: file.path)
-
-      out = run_with(adapter: adapter, events: [:timeout, :timeout], sparkline_width: 4)
-
-      last_frame = out.split("\e[H\e[2J").last
-      # The detail panel's "Session:  aaaaaaaa-..." line also matches; the
-      # table row (with the sparkline) is the last matching line, not the
-      # first.
-      data_line = last_frame.lines.reverse.find { |l| l.include?("aaaaaaaa") }
-
-      refute_nil data_line
-      codepoints = data_line.codepoints.select { |cp| cp.between?(0x2800, 0x28FF) }
-      assert(codepoints.any? { |cp| cp > 0x2800 }, "expected at least one non-blank sparkline cell after growth")
+  def test_dead_sessions_remain_visible_and_are_labeled_dead
+    with_project_dir do |dir, proj|
+      write_session(proj, title: "Orphaned")
+      frame = Frame.new(run_app(dir, keys: [], size: [140, 30], process_finder_all: -> { [] }))
+      row = frame.row_containing("Orphaned")
+      assert_includes row.plain, "DEAD"
     end
   end
 
-  def test_every_line_ends_with_crlf_so_raw_mode_does_not_cascade_lines
-    Tempfile.create("aiwatch-live-crlf") do |file|
-      File.utime(Time.now, Time.now, file.path)
-      session = build_session(file_path: file.path)
-
-      out = run_events([session], [])
-      frame = out.split("\e[H\e[2J").last
-
-      refute_includes frame.gsub("\r\n", ""), "\n", "found a bare \\n not paired with \\r in: #{frame.inspect}"
+  def test_a_live_process_match_marks_the_session_active_with_a_pid
+    with_project_dir do |dir, proj|
+      path = write_session(proj, title: "Live one")
+      slug = File.basename(File.dirname(path))
+      procs = [{pid: 999, cwd: "/home/x/proj", slug: slug, cmdline: %w[claude]}]
+      frame = Frame.new(run_app(dir, keys: [], process_finder_all: -> { procs }))
+      row = frame.row_containing("Live one")
+      assert_includes row.plain, "ACTIVE"
+      assert_includes row.plain, "999"
     end
   end
 
-  def test_long_project_and_model_list_are_truncated_so_the_row_does_not_wrap
-    Tempfile.create("aiwatch-live-wide") do |file|
-      File.utime(Time.now, Time.now, file.path)
-      session = build_session(
-        file_path: file.path,
-        project: "/home/someone/work/a/very/deeply/nested/project/directory/path/name",
-        model: "claude-sonnet-5"
-      )
-      session.add_event(Aiwatch::UsageEvent.new(
-        message_id: "m2", model: "claude-opus-5", timestamp: Time.now, cwd: session.project,
-        input_tokens: 1, output_tokens: 1, cache_creation_input_tokens: 0,
-        cache_read_input_tokens: 0, cache_creation_1h_tokens: 0, cache_creation_5m_tokens: 0
-      ))
-
-      out = run_events([session], [])
-      # The detail panel's "Session:  <full-uuid>" line also starts with
-      # the short id; the table row is the last matching line.
-      data_line = out.lines.reverse.find { |l| l.include?(session.short_id) }
-
-      refute_nil data_line
-      assert(data_line.length < 120, "expected row to stay well under terminal width, was #{data_line.length} chars")
-      assert_includes data_line, "…"
+  def test_footer_lists_the_key_reference
+    with_project_dir do |dir, _proj|
+      frame = Frame.new(run_app(dir, keys: [], size: [200, 30]))
+      footer = frame[frame.rows.keys.max]
+      assert_includes footer.plain, "Kill"
+      assert_includes footer.plain, "Refresh"
     end
-  end
-
-  def test_each_session_gets_a_stable_distinct_color_in_first_seen_order
-    Tempfile.create("aiwatch-live-a") do |file_a|
-      Tempfile.create("aiwatch-live-b") do |file_b|
-        [file_a, file_b].each { |f| File.utime(Time.now, Time.now, f.path) }
-
-        a = build_session(id: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", file_path: file_a.path)
-        b = build_session(id: "bbbbbbbb-bbbb-cccc-dddd-eeeeeeeeeeee", file_path: file_b.path)
-
-        out = run_events([a, b], [:timeout], out: FakeTTY.new)
-
-        frames = out.split("\e[H\e[2J").reject(&:empty?)
-        assert_equal 2, frames.length
-
-        colors_per_frame = frames.map do |frame|
-          line_a = frame.lines.reverse.find { |l| l.include?("aaaaaaaa") }
-          line_b = frame.lines.reverse.find { |l| l.include?("bbbbbbbb") }
-          color_of = ->(line) { line[/\e\[1;(\d+)m/, 1] }
-          [color_of.call(line_a), color_of.call(line_b)]
-        end
-
-        first_a, first_b = colors_per_frame.first
-        refute_nil first_a
-        refute_nil first_b
-        refute_equal first_a, first_b
-        assert(colors_per_frame.all? { |a_color, b_color| [a_color, b_color] == [first_a, first_b] })
-      end
-    end
-  end
-
-  # --- Interactive navigation and detail panel ---
-
-  def test_first_session_is_selected_by_default_and_shown_in_the_detail_panel
-    Tempfile.create("aiwatch-live-a") do |file_a|
-      Tempfile.create("aiwatch-live-b") do |file_b|
-        [file_a, file_b].each { |f| File.utime(Time.now, Time.now, f.path) }
-        a = build_session(id: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", file_path: file_a.path, timestamp: Time.now)
-        b = build_session(id: "bbbbbbbb-bbbb-cccc-dddd-eeeeeeeeeeee", file_path: file_b.path, timestamp: Time.now - 10)
-
-        out = run_events([a, b], [])
-
-        assert_includes out, "Session:  aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
-        data_lines = out.lines.select { |l| l.include?("aaaaaaaa") || l.include?("bbbbbbbb") }
-        assert(data_lines.any? { |l| l.start_with?(">") && l.include?("aaaaaaaa") })
-      end
-    end
-  end
-
-  def test_down_arrow_moves_selection_to_the_next_session_and_updates_the_panel
-    Tempfile.create("aiwatch-live-a") do |file_a|
-      Tempfile.create("aiwatch-live-b") do |file_b|
-        [file_a, file_b].each { |f| File.utime(Time.now, Time.now, f.path) }
-        a = build_session(id: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", file_path: file_a.path, timestamp: Time.now)
-        b = build_session(id: "bbbbbbbb-bbbb-cccc-dddd-eeeeeeeeeeee", file_path: file_b.path, timestamp: Time.now - 10)
-
-        out = run_events([a, b], [:down])
-        last_frame = out.split("\e[H\e[2J").last
-
-        assert_includes last_frame, "Session:  bbbbbbbb-bbbb-cccc-dddd-eeeeeeeeeeee"
-      end
-    end
-  end
-
-  def test_selection_does_not_move_past_the_last_session
-    Tempfile.create("aiwatch-live-a") do |file|
-      File.utime(Time.now, Time.now, file.path)
-      session = build_session(file_path: file.path)
-
-      out = run_events([session], [:down, :down])
-      last_frame = out.split("\e[H\e[2J").last
-
-      assert_includes last_frame, "Session:  #{session.id}"
-    end
-  end
-
-  def test_up_arrow_moves_selection_back_up
-    Tempfile.create("aiwatch-live-a") do |file_a|
-      Tempfile.create("aiwatch-live-b") do |file_b|
-        [file_a, file_b].each { |f| File.utime(Time.now, Time.now, f.path) }
-        a = build_session(id: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", file_path: file_a.path, timestamp: Time.now)
-        b = build_session(id: "bbbbbbbb-bbbb-cccc-dddd-eeeeeeeeeeee", file_path: file_b.path, timestamp: Time.now - 10)
-
-        out = run_events([a, b], [:down, :up])
-        last_frame = out.split("\e[H\e[2J").last
-
-        assert_includes last_frame, "Session:  aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
-      end
-    end
-  end
-
-  # --- Kill flow ---
-
-  def test_x_shows_a_confirmation_prompt_without_killing_yet
-    Tempfile.create("aiwatch-live-kill") do |file|
-      File.utime(Time.now, Time.now, file.path)
-      session = build_session(file_path: file.path)
-      killed = false
-
-      out = run_events([session], [:kill], process_finder: ->(_path) { 999 }, killer: ->(_pid, _sig) { killed = true })
-      last_frame = out.split("\e[H\e[2J").last
-
-      assert_includes last_frame, "Kill session #{session.short_id}? y = confirm, n/Esc = cancel"
-      refute killed
-    end
-  end
-
-  def test_confirming_a_kill_sends_sigterm_to_the_process_found_for_that_session
-    Tempfile.create("aiwatch-live-kill") do |file|
-      File.utime(Time.now, Time.now, file.path)
-      session = build_session(file_path: file.path)
-      calls = []
-      finder = ->(path) {
-        calls << [:find, path]
-        4242
-      }
-      killer = ->(pid, signal) { calls << [:kill, pid, signal] }
-
-      out = run_events([session], [:kill, :confirm], process_finder: finder, killer: killer)
-
-      assert_equal [:find, session.file_path], calls[0]
-      assert_equal [:kill, 4242, "TERM"], calls[1]
-      assert_includes out, "Sent SIGTERM to process 4242"
-    end
-  end
-
-  def test_cancelling_a_kill_does_not_call_the_killer
-    Tempfile.create("aiwatch-live-kill") do |file|
-      File.utime(Time.now, Time.now, file.path)
-      session = build_session(file_path: file.path)
-      killed = false
-
-      out = run_events(
-        [session], [:kill, :cancel],
-        process_finder: ->(_path) { 999 }, killer: ->(_pid, _sig) { killed = true }
-      )
-
-      refute killed
-      last_frame = out.split("\e[H\e[2J").last
-      refute_includes last_frame, "Kill session"
-    end
-  end
-
-  def test_kill_reports_when_no_process_is_found_for_the_session
-    Tempfile.create("aiwatch-live-kill") do |file|
-      File.utime(Time.now, Time.now, file.path)
-      session = build_session(file_path: file.path)
-      killed = false
-
-      out = run_events(
-        [session], [:kill, :confirm],
-        process_finder: ->(_path) {}, killer: ->(_pid, _sig) { killed = true }
-      )
-
-      refute killed
-      assert_includes out, "Could not find a running process for session #{session.short_id}"
-    end
-  end
-
-  # active? is based on the log file's mtime, which sending a signal
-  # never touches — a killed session would otherwise keep showing as
-  # active until that mtime naturally goes stale (active_threshold_minutes,
-  # up to several minutes by default).
-  def test_killing_a_session_removes_it_from_the_list_immediately
-    Tempfile.create("aiwatch-live-kill-remove") do |file|
-      File.utime(Time.now, Time.now, file.path)
-      session = build_session(file_path: file.path)
-
-      out = run_events(
-        [session], [:kill, :confirm],
-        process_finder: ->(_path) { 4242 }, killer: ->(_pid, _sig) {}
-      )
-      last_frame = out.split("\e[H\e[2J").last
-
-      assert_includes last_frame, "0 active session(s)"
-      assert_includes last_frame, "(no active sessions)"
-    end
-  end
-
-  # --- Manual refresh ---
-
-  class AppearingFakeAdapter
-    def initialize(sequence)
-      @sequence = sequence
-      @call_index = 0
-    end
-
-    def discover_sessions
-      result = @sequence[@call_index] || @sequence.last
-      @call_index += 1
-      result
-    end
-  end
-
-  def test_r_immediately_refreshes_without_waiting_for_the_timeout
-    Tempfile.create("aiwatch-live-refresh") do |file|
-      File.utime(Time.now, Time.now, file.path)
-      session = build_session(file_path: file.path)
-      adapter = AppearingFakeAdapter.new([[], [session]])
-
-      out = run_with(adapter: adapter, events: [:refresh])
-      last_frame = out.split("\e[H\e[2J").last
-
-      assert_includes last_frame, "1 active session(s)"
-      assert_includes last_frame, session.short_id
-    end
-  end
-
-  def test_session_name_appears_in_both_the_table_and_the_detail_panel
-    Tempfile.create("aiwatch-live-name") do |file|
-      File.utime(Time.now, Time.now, file.path)
-      session = build_session(file_path: file.path)
-      session.set_title("Fix the login bug")
-
-      out = run_events([session], [])
-
-      assert_includes out, "NAME"
-      assert_includes out, "Name:     Fix the login bug"
-      data_line = out.lines.reverse.find { |l| l.include?(session.short_id) }
-      assert_includes data_line, "Fix the login bug"
-    end
-  end
-
-  def test_footer_lists_the_refresh_key
-    out = run_events([], [])
-
-    assert_includes out, "r refresh"
   end
 end
