@@ -122,3 +122,55 @@ file's mtime is within the configured threshold (default 5 minutes) of now.
   the corpus) is not consumed. If Claude Code ever emits multiple
   iterations per line for agentic/tool loops, usage may need to be summed
   from `iterations` instead of the top-level fields.
+
+## Fields the `live` dashboard reads (beyond cost math)
+
+`FeedBuilder` (the live dashboard's per-session event feed and sidebar
+side-channels — see `docs/decisions.md`) reads more of the schema than
+the cost path above. Same caveat as everywhere else in this doc: this is
+a snapshot of one real corpus, not a published spec, and every access is
+nil-safe for exactly that reason.
+
+- **`message.content`** (assistant lines): in the inspected corpus (CLI
+  v2.1.233), each line's `content` array holds exactly one block; the
+  same logical message streams across multiple lines sharing one
+  `message.id`. Block `type` observed: `text` (`{text}`), `thinking`
+  (`{thinking, signature}` — often empty, never narrated), `tool_use`
+  (`{id, name, input}` — `name` is `mcp__<server>__<tool>` for MCP
+  tools, shortened to `<tool>` in the feed).
+- **`message.stop_reason`**: `tool_use`, `end_turn`, `stop_sequence`, or
+  `null` (a non-final streaming chunk). No `max_tokens`/`refusal`
+  observed.
+- **`effort`**: top-level on the assistant line, not inside `message`.
+  Only ever `"high"` in the inspected corpus, but the field exists.
+- **`message.diagnostics.cache_miss_reason`**: present on a small
+  fraction of assistant lines (`previous_message_not_found`,
+  `tools_changed`, `model_changed`); tracked as a count, not narrated.
+- **`user` lines**: `message.content` is a bare `String` (a real prompt)
+  or an `Array` of `tool_result` blocks (`{type, tool_use_id, content,
+  is_error}`). Only `is_error` is read — full tool output is
+  intentionally not surfaced in the feed.
+- **`system` lines**, by `subtype`: `turn_duration`
+  (`{durationMs, messageCount, ...}`, top-level on the line) and
+  `compact_boundary` (`{compactMetadata: {trigger, preTokens,
+  postTokens, ...}}`) are read; other subtypes
+  (`away_summary`, `local_command`, `bridge_status`,
+  `scheduled_task_fire`) are not.
+- **`pr-link` lines**: `{prNumber, prUrl, timestamp}`.
+- **`permission-mode` lines / the `permissionMode` field**: real
+  variance observed (`bypassPermissions`, `auto`, `acceptEdits`, `plan`,
+  `default`) — tracked as a side-channel, not narrated in the feed.
+- **`version`**: constant within a session; used for a per-session
+  display field.
+- **Deliberately not read**, despite being present: `mode`/`entrypoint`
+  (zero variance observed — always `"normal"`/`"cli"`), `last-prompt`
+  and `custom-title` (redundant with `ai-title` for this project's
+  purposes), `worktree-state`/`relocated` (branch comes from a live
+  `.git/HEAD` read instead — see `docs/decisions.md`), `queue-operation`,
+  `file-history-*`, `bridge-session`, `agent-name`.
+
+`gitBranch` (present on most message-bearing lines) is read by nothing
+in this codebase — deliberately: it's pinned to the session's launch
+directory and reports `"HEAD"` whenever that directory isn't a git repo,
+even after the session's real cwd moves into one. See "Distrust the
+logged `gitBranch`" in `docs/decisions.md`.

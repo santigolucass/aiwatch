@@ -194,19 +194,244 @@ a match is not mathematically guaranteed correct — just true for every
 real case checked so far, and far more reliable than the two prior
 attempts.
 
-## A killed session is suppressed locally, not re-derived from the file
+## A killed session is detected as dead, not suppressed locally
 
-`Session#active?` is based on the log file's mtime; sending a signal to
-the process doesn't touch that file, so a killed session would otherwise
-keep showing as active until the mtime naturally goes stale
-(`active_threshold_minutes`, several minutes by default) — refreshing
-after a kill wouldn't be enough on its own to make it disappear. `live`
-tracks killed session ids for the life of the run and filters them out
-of every subsequent refresh regardless of file mtime, and refreshes
-immediately after a kill attempt so this takes effect on the very next
-frame rather than waiting for the regular interval. `r` also refreshes
-on demand, for the same reason a new session showing up shouldn't need
-waiting out the interval either.
+Superseded by the ctop-style dashboard (see below): `active?` (log file
+mtime) now only decides whether a session is *tracked* at all; whether
+it's shown as ACTIVE or DEAD is re-derived every tick from a live `/proc`
+scan, matched against each session's project directory the same way
+`ProcessFinder.find_pid` always has. Killing a process makes it
+disappear from `/proc`, so the very next `/proc` re-scan (forced
+immediately after a kill attempt, not waiting for the regular interval)
+already shows it as DEAD without needing to separately remember "this id
+was killed" — the old `@killed_ids` local-suppression hash this section
+used to describe is gone; liveness is asked for fresh, not cached.
+
+## `live` became a ctop-style dashboard
+
+The single-view table (`docs/decisions.md`'s entries above, up through
+"Session names come from `ai-title` lines") was replaced with a
+full-screen operations panel: a title bar, a stats bar, a 13-column
+session table grouped by agent kind, a three-box sidebar (process
+detail, tokens, a context-window bar), a scrolling per-session event
+log, sort/filter/search/pin/purge/kill-all/export/theme, and four extra
+full-screen views (Timeline, History, Heatmap, and a generated `?` help
+overlay) — all still zero-dependency, still verified against this
+project's own real `~/.claude/projects` corpus and real running `claude`
+processes at every step, not just unit tests. The sections below record
+what changed and why; entries above this point describe the original
+single-view implementation and mostly still hold (the `\r\n` fix, the
+Braille sparkline, project/model column truncation) except where a later
+entry here explicitly supersedes one.
+
+### A Canvas replaces string concatenation
+
+Every rendering bug logged above — the `●` marker, the column caps, the
+`\r\n` cascade — came from building frames by concatenating strings and
+hoping they fit. `Tui::Canvas` is a `width x height` grid of cells that
+writes clip against on contact, which makes "this line is too wide"
+structurally impossible instead of merely tested for. It's backed by a
+per-cell grid, not a list of row spans: an earlier span-based design
+(keep a list of `{col, text}` writes per row, compose left-to-right) had
+a real bug where a box's title, written *after* the top border, got
+silently dropped as "overlapping" the border span instead of painting
+over part of it. The per-cell model fixes this by construction — a later
+write always overwrites exactly the columns it touches and nothing
+else — and also needed a `post` field on each cell (not just `pre`) so a
+write's own *trailing* SGR codes (a closing reset with no character
+after it) attach to that write's own last cell rather than leaking onto
+whatever a completely unrelated later write happens to place next door.
+
+### `Tui::Grid` is TextTable's counterpart for a fixed-width dashboard, not a replacement for it
+
+`TextTable` (list/daily/show) answers "how wide do these columns need to
+be"; `Grid` (the dashboard's 13-column table) answers "given exactly N
+columns to fill, which of these get to exist, and how wide is each" —
+different enough contracts that merging them would make both worse.
+Columns carry a `priority`; when there isn't room for all of them, the
+least-essential (highest priority number) drops first, and 0-2 never
+drop. When there's surplus width, **weighted** (free-text) columns like
+TITLE and DIRECTORY get first claim on it, and weight-0 capped columns
+(PID, COST, CPU%...) only mop up whatever's left — tried the reverse
+order first, and it was wrong in a way real widths hit constantly: a
+handful of small-max columns (PID wanting +2, STATUS +2, COST +3...)
+ate the *entire* surplus before TITLE ever got a look at it, so TITLE
+sat at its bare minimum width even in a 140-column terminal. Weighted
+columns having small `max` deltas by design is exactly why growing them
+last starves them but growing fixed columns last doesn't.
+
+### Theme's 256-color escape codes were invalid until this rewrite caught it
+
+`Tui::Theme#sgr` emitted `\e[<palette-index>m` for every ansi256-depth
+role (`\e[208m` for an orange border) — not a valid SGR sequence at all;
+the correct extended-color form is `\e[38;5;<index>m`. Every color test
+up to this point ran at `depth: :none` or stripped ANSI before
+asserting, so nothing caught it — it surfaced only when converting a
+real colored snapshot to HTML for a demo and finding every span came out
+uncolored. Fixed by branching on depth: `:ansi16` codes are bare SGR
+parameters (30-37) and stay as `\e[<code>m`; `:ansi256` codes are
+palette indices and now get `\e[38;5;<code>m` (or `\e[1;38;5;<code>m`
+bold). A reminder that "renders as expected when I strip the codes to
+test it" and "renders as expected in a real terminal" are different
+claims — the pricing-table/process-finder/git-branch verification
+discipline this project already had was never applied to what the
+*escape codes themselves* actually said.
+
+### The context-window bar's denominator comes from real pricing data
+
+Naively assuming a 200k-token context window is actively wrong for this
+project's own models: on this machine's real corpus, 70-80% of turns on
+the 1M-context models exceed 200k tokens, which would render most
+sessions as "over 100% full." `max_input_tokens` is a field LiteLLM's
+pricing data already carries, and `PricingTable` already fetches and
+caches that data for cost math — `PricingTable#context_limit_for(model)`
+just reads the field that was already in hand, so no new heuristic or
+data source was needed. `nil` (unpriced/unknown model) renders as `?`,
+never a guessed default. The bundled offline pricing snapshot had to be
+regenerated to carry this field too, since it predates this feature.
+
+### Distrust the logged `gitBranch`; read `.git/HEAD` from the live process's cwd instead
+
+The `gitBranch` field Claude Code logs on each JSONL line is pinned to
+wherever the session *launched*, and reports the literal string `"HEAD"`
+whenever that launch directory isn't a git repo — even while the
+session's real, current cwd later moved into one. Verified on a real
+session: `gitBranch: "HEAD"` on all 2154 lines, while 1875 of them had
+`cwd: /home/lucas/code/aiwatch`, which is a real repo on `master`.
+`GitBranch.for(dir)` instead reads `.git/HEAD` directly from a live
+process's actual cwd (found via `ProcessFinder`) — unaffected by any of
+that, and cheap enough to not matter: measured ~1ms per read,
+page-cached. It follows the worktree `gitdir:` indirection (a worktree's
+`.git` is a *file* pointing elsewhere) so worktree sessions report their
+own branch, not the main checkout's. The logged field is kept only as a
+fallback for a dead session with no live process to ask.
+
+### SessionStore tails files incrementally instead of re-parsing them
+
+`list`/`daily`/`show` re-parse a whole file every call, which is fine
+for a one-shot command but would mean re-reading this project's own
+~250MB/34-file `~/.claude/projects` corpus every 2-second tick.
+`SessionStore` keeps a `TailReader` per file with a stat-based skip gate
+(untouched mtime+size ⇒ zero bytes read, not even opened) and reads only
+the bytes appended since the last read otherwise. Measured on the real
+corpus: cold refresh in 48ms (not the 10-30s a full parse would take),
+and a no-op tick in 0.6ms.
+
+A file larger than 256KB gets **tail-seeked** on its first read —
+skipping straight to its last 256KB rather than reading from byte 0 — so
+the dashboard has something to show immediately instead of blocking on
+a multi-megabyte parse the moment it discovers an existing session.
+Cumulative totals for the skipped leading portion are then backfilled a
+bounded chunk at a time (512KB/tick by default — a conservative 32KB
+default technically also converges, just over many minutes instead of
+under a second; measured against the real corpus), prioritizing
+whichever session is currently selected; `LiveSession#totals_partial?`
+is true and cost renders with a `~` prefix until backfill catches up. No
+background thread: `JSON.parse` doesn't release the GVL, so a thread
+would stutter the render loop anyway while adding real thread-safety
+surface for no benefit.
+
+Backfill reads *backward* in fixed-size byte chunks with no line-
+boundary alignment, so a chunk boundary can and does land mid-line. The
+naive fix (discard each chunk's leading fragment as "probably torn")
+was tried and is wrong: it discards the *wrong* half of the split line
+and drops it entirely, losing one full line of data per chunk boundary
+crossed — confirmed on a real corpus by comparing incremental-backfill
+totals against a full re-parse, off by exactly `chunks × tokens_per_line`.
+The fix carries each chunk's leading fragment forward and prepends it to
+the *next* (further-back) chunk read, reconstructing the exact line that
+boundary split — verified byte-exact against a synthetic 500-line file
+with a deliberately awkward chunk size, and confirmed to converge to
+*exactly* the same totals as a full re-parse across every real session
+in the corpus (0 mismatches across 34 sessions).
+
+A rotation or truncation mid-run (detected via inode change or a
+shrinking size) makes `TailReader` correctly restart from scratch on its
+own — but that alone isn't enough: the `Session` and dedup hash a
+`SessionStore` cursor built from what the reader served *before* the
+rotation are now stale data from a file that, as far as that cursor is
+concerned, no longer exists. The first version of this fix let
+`TailReader` silently reset itself while `SessionStore` kept folding
+fresh post-rotation content into the old stale `Session` and dedup
+hash — which, worse, actively *suppressed* the new content whenever an
+id happened to collide with the old file's (e.g. a message re-sent after
+rotation looked like an already-seen duplicate). Fixed by having
+`TailReader` expose a one-shot `#reset?` signal so `SessionStore` knows
+to rebuild the `Session`/dedup-hash/`LiveSession` trio from scratch on
+exactly the tick a rotation is detected.
+
+### The event feed shows conversation content — a reversal of "never display it"
+
+`FeedBuilder` reads `message.content` to narrate the session log (tool
+calls, assistant text snippets, user prompts) — the one place in
+aiwatch that does. This directly reverses the earlier stated policy that
+`message.content` (including `thinking` blocks) is "never logged or
+displayed by aiwatch." Made deliberately, not accidentally: the ctop-
+style dashboard's whole point is showing what a session is *doing right
+now*, and a feed that can't say what happened isn't that. Everything
+stays 100% local exactly as before — the difference is that this
+content now reaches the screen (and an `E` export), not just token/cost
+math. Text is snippeted to 240 characters; `thinking` blocks are never
+narrated (usually empty in practice, and the least useful to show even
+when not); tool results show ok/error, not full stdout.
+
+### The feed is built in file order, never sorted by timestamp
+
+Session log timestamps are not monotonic — 1648 non-monotonic
+transitions found across the real corpus, including one line that
+jumped forward three hours and then back on the very next line (looks
+like a TZ-handling bug on some code path, cause unconfirmed). Sorting a
+feed by timestamp would visibly scramble it. `FeedBuilder#ingest` is fed
+lines in the order `SessionStore` reads them (which is always file
+order, append-only), and every timestamp it keeps is for *display*
+only, never for ordering.
+
+### `K` (kill all) requires typing "yes", not a single keypress
+
+Every other destructive action here (`x`, `X`) asks for one
+confirmation keypress, appropriate for a single, clearly-selected
+target. Killing *every visible active session* at once is a
+different order of consequence, and a single accidental `y` — the same
+key that confirms a routine single-session kill — is exactly the kind
+of muscle-memory mistake this should be immune to. `K` opens the same
+text-entry mode `/` (filter) and `E` (export) already use, requiring the
+literal string "yes" plus Enter; anything else cancels with no effect.
+
+### Canvas neutralizes embedded control characters, not just ANSI codes
+
+Found from real usage, not a test: the session log showing real
+conversation content (see "reversal" above) means row text now
+sometimes comes from an actual multi-line prompt or tool-arg block —
+and a literal embedded newline, written straight through to the
+terminal, moves the *real* cursor down a row on its own. That's LF's
+own terminal-level meaning, unrelated to the OPOST/ONLCR translation
+the original `\r\n` fix (see above) addresses, so raw mode doesn't
+suppress it. The visible symptom was two-fold and looked unrelated
+until traced to one cause: garbage text (an XML-tagged command block)
+bleeding into the footer and overwriting the `o Open` key label, and an
+active session appearing to "vanish and come back" every 1-2 seconds.
+The second symptom is a consequence of `Screen#flush` diffing by
+default: a corrupted row leaks onto whatever's below it, and if that
+row's content doesn't happen to change on the next tick, diffing skips
+repainting it — so the corruption persists until some unrelated content
+change eventually forces that row to repaint. Fixed by having
+`Canvas#write` run every string through `Tui::Ansi.sanitize` (replacing
+every C0 control byte except ESC, and DEL, with a space) before any
+other processing — the same "make bad input structurally impossible to
+mis-render" posture Canvas already had for width, extended to control
+bytes.
+
+### CSV export is hand-rolled, not `require "csv"`
+
+`aiwatch` has stayed zero-runtime-dependency by only ever using
+default-gem stdlib (`json`, `optparse`, `net/http`, `io/console`,
+`time`, `date`). As of Ruby 3.4, `csv` is a *bundled* gem, not a default
+one — assuming it's installed would quietly break that guarantee for
+anyone whose Ruby doesn't happen to have it bundled or already
+installed. `Exporter`'s CSV path hand-rolls the ~10 lines of RFC 4180
+quoting this export actually needs (quote a cell containing a comma,
+quote, or newline; double any embedded quotes) rather than pull in the
+gem for that.
 
 ## Session names come from `ai-title` lines, last one wins
 

@@ -1,14 +1,52 @@
 # aiwatch
 
-An htop for your local AI coding agents. It reads the session logs that
-[Claude Code](https://claude.com/product/claude-code) already keeps on your
-machine and turns them into token usage and estimated cost — per session,
-per day, or live as agents run.
+[![CI](https://github.com/santigolucass/aiwatch/actions/workflows/ci.yml/badge.svg)](https://github.com/santigolucass/aiwatch/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+![Ruby](https://img.shields.io/badge/ruby-%3E%3D%203.2-CC342D)
+![Zero runtime dependencies](https://img.shields.io/badge/dependencies-zero-brightgreen)
+
+**An `htop`/`ctop` for your local AI coding agents.** It reads the session
+logs [Claude Code](https://claude.com/product/claude-code) already keeps on
+your machine and turns them into token usage, estimated cost, process
+stats, and a live event feed — per session, per day, or as a full-screen
+dashboard while agents are running. Nothing leaves your machine.
+
+```
+┌──────────────────────────────────────────────────────────────────────────────────────────────┐
+│                         AIWATCH — AI Agent Terminal Operations Panel                           │
+└──────────────────────────────────────────────────────────────────────────────────────────────┘
+● 1 active   ○ 1 dead   |   Cost: $0.3270   |   17:00:58
+Tokens  In: 4   Out: 21,800   Cache: 218,000
+Sessions: 1 active  1 dead  2 total   |   Avg tokens/turn: 109,002
+┌─ Claude Code (2) ───────────────────────────────────────────────────────┐
+│    PID STATUS   CTX TITLE          COST  CPU%  MEM% STAR… BRANCH MODEL  │
+│> 84213 ACTIVE   86% Fix flaky…   $0.28…     -     - 1m    main   claud… │
+│      - DEAD     23% Rewrite t…   $0.04…     -     - 10m   -      claud… │
+└──────────────────────────────────────────────────────────────────────────────────────────────┘
+┌─ Session Log: /home/dev/code/myapp ─────────────────────────────────────────────────────────┐
+│19:59:28 ● TOOL      Executed 1 tool: [Bash]                                                  │
+│19:59:58 ● TOOL      Executed 1 tool: [Edit]                                                  │
+│20:00:28 ● ASSISTANT Ran the flaky spec 20x locally; it was a timing race, not the fixture.    │
+└──────────────────────────────────────────────────────────────────────────────────────────────┘
+KEYS: hjkl Nav  x Kill  X Force  A Purge  K All  p Pin  s Sort  / Filter  F Search  r Refresh  …
+```
 
 **Status:** v0.1.0, Claude Code only. Not yet published to RubyGems — see
 [Install](#install) to run it from source. Other agents (Codex CLI, Gemini
 CLI) are on the roadmap behind the same adapter interface that already
 powers Claude Code support.
+
+## Contents
+
+- [Why](#why)
+- [Install](#install)
+- [Usage](#usage) — [`list`](#aiwatch-list-or-just-aiwatch) ·
+  [`daily`](#aiwatch-daily) · [`show`](#aiwatch-show-id) ·
+  [`live`](#aiwatch-live) · [`--json`](#--json)
+- [How it works](#how-it-works)
+- [Development](#development)
+- [Roadmap](#roadmap)
+- [License](#license)
 
 ## Why
 
@@ -97,75 +135,96 @@ An ambiguous prefix lists the matching session ids instead of guessing.
 
 ### `aiwatch live`
 
-Interactive, auto-refreshing view of currently active sessions (default:
-every 2s) — an `htop` for your agents. `↑`/`↓` move a selection cursor
-between sessions and expand a detail panel above the table for whichever
-one is selected; `x` asks for confirmation, then sends `SIGTERM` to the
-process behind that session; `r` refreshes on demand; `q` or Ctrl-C
-quits. All of these act instantly, no Enter needed. Each session also
-gets its own color (stable
-for the life of the run, assigned in the order sessions first appear)
-and a small sparkline of its recent token throughput — a low flat
-baseline means idle, a filled one means it's actively working:
+A full-screen, auto-refreshing operations panel for your active Claude
+Code sessions — a `ctop` for agents, not just an `htop`. Every session's
+row carries its OS process (PID, CPU%, MEM%, a CPU sparkline), its real
+git branch, and a live context-window occupancy estimate; the selected
+session expands into a sidebar (process detail, token/cost totals, a
+context-window bar) and a scrolling log of what it's actually doing
+right now (tool calls, assistant replies, user prompts):
 
 ```
-$ aiwatch live
-aiwatch live — 19:08:57 — 2 active session(s)
-
-Session:  b3f1a7c2-4e6d-4a9b-8f21-7d5c9e2a11f0
-Name:     Fix flaky checkout test
-Project:  /home/dev/code/myapp
-Activity: just now -> just now
-Cost:     $0.2359
-
-MODEL            INPUT  OUTPUT  CACHE READ  CACHE CREATE  COST (USD)
-claude-sonnet-5    165     18K           0             0     $0.1807
-claude-opus-5       30    2.2K           0             0     $0.0552
-
-   SESSION   NAME                         PROJECT                   MODEL(S)                  COST (USD)  TOKENS/s (80s)        LAST ACTIVITY
->  b3f1a7c2  Fix flaky checkout test      /home/dev/code/myapp      claude-sonnet-5,claude-…     $0.2359  ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣀⣤⣾⣷⣄  just now
-   e9c4d8a1  Rewrite the onboarding docs  /home/dev/code/docs-site  claude-sonnet-5              $0.0311  ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣀⣀⣀⣀⣀  just now
-
-↑/↓ select session   x kill selected session   r refresh   q quit
+┌────────────────────────────────────────────────────────────────────────────────────────────────┐
+│                                AIWATCH — AI Agent Terminal Operations Panel                      │
+└────────────────────────────────────────────────────────────────────────────────────────────────┘
+● 1 active   ○ 1 dead   |   Cost: $0.3270   |   17:01:24
+Tokens  In: 4   Out: 21,800   Cache: 218,000
+Sessions: 1 active  1 dead  2 total   |   Avg tokens/turn: 109,002
+┌─ Claude Code (2) ─────────────────────────────────────────────────┐┌─ Session Detail ──────────────┐
+│     PID STATUS   CTX TITLE        COST  CPU%  MEM% STAR… BRANCH … ││PID:        84213              │
+│>  84213 ACTIVE   86% Fix flaky… $0.28…     -     - 1m    main   … ││Status:     ACTIVE             │
+│       - DEAD     23% Rewrite t… $0.04…     -     - 10m   -      … ││Model:      claude-sonnet-5    │
+│                                                                    ││Branch:     main               │
+│                                                                    ││Started:    1m ago             │
+│                                                                    ││CPU: -   MEM: -   Stop: -       │
+└─────────────────────────────────────────────────────────────────────┘└────────────────────────────────┘
+┌─ Session Log: /home/dev/code/myapp ───────────────────────────────────────────────────────────┐
+│19:59:54 ● TOOL      Executed 1 tool: [Bash]                                                    │
+│20:00:24 ● TOOL      Executed 1 tool: [Edit]                                                    │
+│20:00:54 ● ASSISTANT Ran the flaky spec 20x locally; it was a timing race, not the fixture.      │
+└────────────────────────────────────────────────────────────────────────────────────────────────┘
+KEYS: hjkl Nav  x Kill  X Force  A Purge  K All  p Pin  s Sort  / Filter  F Search  r Refresh  o Open  G Group  L Log  W Timeline…
 ```
 
-(`b3f1a7c2` — the selected row, marked `>` — and its sparkline render in
-the same color; `e9c4d8a1` gets a different one. `NAME`, `PROJECT` and
-`MODEL(S)` are truncated with `…` past a fixed width so a long value
-can't push the row wider than the terminal and wrap. The selection
-cursor is a plain `>`, not a Unicode glyph, for the same reason the
-sparkline uses Braille and not block characters — see below.)
+Every one of these keys acts instantly, no Enter needed, except where
+noted:
 
-Pressing `x` replaces the footer with a confirmation prompt
-(`Kill session b3f1a7c2? y = confirm, n/Esc = cancel`) before anything
-happens — killing an agent's process is irreversible and might land
-mid-task, so it never fires on a single accidental keypress. Finding
-*which* process to signal works by matching a running `claude` process's
-current working directory against the session's *project directory*
-(where it launched — not wherever the agent's tool calls later `cd`'d
-to, e.g. into a git worktree), so this only works on Linux; on other
-platforms, or if more than one process matches, `live` reports "could
-not find a running process" instead of guessing. A killed session
-disappears from the list
-on the next refresh — including the immediate one `live` triggers right
-after the kill, so you don't have to wait or press `r` yourself.
+| Key | Does |
+|---|---|
+| `↑`/`↓`/`j`/`k`, `←`/`→`/`h`/`l` | Move the selection |
+| `Home`/`End` | Jump to the first/last visible session |
+| `PgUp`/`PgDn` | Scroll the session log |
+| `x` | Kill the selected session (`SIGTERM`), after a `y`/`n` confirm |
+| `X` | Force-kill (`SIGKILL`), same confirm |
+| `K` | Kill **every** visible active session — requires typing `yes` and Enter, not a single keypress, since this is a much bigger blast radius than `x`/`X` |
+| `A` | Purge dead entries from the table |
+| `p` | Pin/unpin the selected session to the top |
+| `s` | Cycle sort: last activity → cost → started → name |
+| `G` | Toggle grouping |
+| `/` | Filter sessions by title/project/branch (type, Enter to apply, Esc to cancel) |
+| `F` | Search and jump to the next match (same text-entry flow as `/`) |
+| `r` | Refresh immediately, without waiting for the interval |
+| `o` | Copy `claude --resume <id>` to your clipboard (and show it in the footer) |
+| `L` | Toggle the session log panel |
+| `E` | Export the currently visible sessions to JSON or CSV (type a path ending in `.csv` for CSV, Enter accepts the suggested default) |
+| `T` | Cycle color theme |
+| `W` / `H` / `C` / `d` | Switch to Timeline / History / Heatmap / back to the main Dash view |
+| `?` | Show the full key reference |
+| `q`, Ctrl-C | Quit |
 
-The sparkline is self-normalized per session — it shows *that* session's
-own recent trend, not an absolute scale comparable across sessions. It's
-built from Braille characters rather than fancier Unicode blocks on
-purpose: Braille is Unicode "Neutral" width and reliably renders as one
-terminal column everywhere, unlike some symbols that render double-width
-in certain terminals and silently break column alignment (an earlier
-version of this view used `●` for an active marker and hit exactly that).
-A session that's been tracked for at least one tick but has zero
-throughput right now shows a low single-dot baseline rather than empty
-space, so it reads as "flat" instead of "not working" — a slot with no
-recorded sample yet (the session just showed up) stays truly blank.
+**Process stats** (PID, CPU%, MEM%, STATUS) come from `/proc` — no
+`lsof`, no gem, Linux only; use `--no-proc` to disable this entirely
+(required on non-Linux, where every session then shows as DEAD since
+there's no way to confirm a live process). A session with recent log
+activity but no matching live process reads as **DEAD**, not gone — it
+stays in the table (purge it with `A`) in case the process is just
+between restarts. CPU%/MEM% need two samples to compute a rate, so a
+freshly-discovered process's first frame shows `-` until the next tick.
+
+**Branch** is read straight from `.git/HEAD` on the live process's
+actual current working directory (following worktree indirection), not
+from the session log — the log's own `gitBranch` field is pinned to
+wherever the session launched and can't be trusted once an agent `cd`s
+into a git worktree.
+
+**Context window** shows the most recent turn's occupancy against the
+model's *real* context limit (from the same pricing data aiwatch already
+uses for cost — never a hardcoded 200k guess, which would be actively
+wrong for a 1M-context model).
+
+Killing a process works by matching a running `claude` process's real
+cwd against the session's project directory (not wherever the agent's
+tool calls later `cd`'d to) — Linux only, and refuses to guess if more
+than one process matches.
 
 ```
 Options:
   --active-minutes N    Minutes of inactivity before a session drops out of live (default: 5)
   --refresh SECONDS     Refresh interval in seconds (default: 2)
+  --ascii               Plain ASCII glyphs instead of Unicode box-drawing/Braille
+  --no-altscreen        Don't switch to the terminal's alternate screen buffer
+  --no-proc             Skip /proc scanning entirely; required on non-Linux
+  --snapshot            Render a single frame to stdout and exit
 ```
 
 ### `--json`
@@ -262,8 +321,9 @@ Product/format decisions made along the way, and why, are logged in
 ## Roadmap
 
 Not in v0.1, but the adapter interface (`Aiwatch::Adapters::Base`) exists
-specifically to make these cheap later: Codex CLI and Gemini CLI adapters,
-`--csv` export, budgets/alerts, and a multi-agent consolidated `live` view.
+specifically to make this cheap later: Codex CLI and Gemini CLI adapters,
+sitting alongside Claude Code in the same `live` dashboard rather than a
+separate tool per agent. Budgets/alerts are also on the list.
 
 ## License
 
