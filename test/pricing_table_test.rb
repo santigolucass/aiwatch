@@ -96,4 +96,24 @@ class PricingTableTest < Minitest::Test
       refute_nil table.price_for("model-b")
     end
   end
+
+  def test_context_limit_for_reads_max_input_tokens
+    with_tmp_paths do |cache_path, snapshot_path|
+      prices = {"model-a" => {"input_cost_per_token" => 1.0, "max_input_tokens" => 1_000_000}}
+      http_get = ->(*) { JSON.generate(prices) }
+      table = build(cache_path: cache_path, snapshot_path: snapshot_path, http_get: http_get)
+
+      assert_equal 1_000_000, table.context_limit_for("model-a")
+    end
+  end
+
+  def test_context_limit_for_is_nil_for_unknown_model_or_missing_field
+    with_tmp_paths do |cache_path, snapshot_path|
+      http_get = ->(*) { JSON.generate(FETCHED_PRICES) } # model-b has no max_input_tokens
+      table = build(cache_path: cache_path, snapshot_path: snapshot_path, http_get: http_get)
+
+      assert_nil table.context_limit_for("does-not-exist")
+      assert_nil table.context_limit_for("model-b")
+    end
+  end
 end

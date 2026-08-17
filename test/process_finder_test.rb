@@ -2,6 +2,7 @@
 
 require_relative "test_helper"
 require "tmpdir"
+require "fileutils"
 
 class ProcessFinderTest < Minitest::Test
   def test_finds_a_process_launched_from_the_sessions_project_directory
@@ -56,7 +57,45 @@ class ProcessFinderTest < Minitest::Test
       Aiwatch::ProcessFinder.slugify("/home/dev/code/myapp/.claude/worktrees/feat-x")
   end
 
+  def test_find_all_returns_pid_cwd_slug_and_cmdline_for_matching_processes
+    Dir.mktmpdir do |root|
+      fake_process(root, 100, comm: "claude", cwd: "/home/x/proj", cmdline: %w[claude --resume])
+      fake_process(root, 200, comm: "other", cwd: "/home/x/other", cmdline: %w[other])
+
+      found = Aiwatch::ProcessFinder.find_all(command_name: "claude", proc_root: root)
+      assert_equal 1, found.length
+      entry = found.first
+      assert_equal 100, entry[:pid]
+      assert_equal "/home/x/proj", entry[:cwd]
+      assert_equal "-home-x-proj", entry[:slug]
+      assert_equal %w[claude --resume], entry[:cmdline]
+    end
+  end
+
+  def test_find_all_returns_empty_array_without_a_proc_directory
+    assert_equal [], Aiwatch::ProcessFinder.find_all(proc_root: "/nonexistent-proc-root")
+  end
+
+  def test_find_pid_via_injected_proc_root
+    Dir.mktmpdir do |root|
+      fake_process(root, 100, comm: "claude", cwd: "/home/x/proj", cmdline: %w[claude])
+      session_file = File.join(root, "-home-x-proj", "uuid.jsonl")
+      assert_equal 100, Aiwatch::ProcessFinder.find_pid(session_file, command_name: "claude", proc_root: root)
+    end
+  end
+
   private
+
+  # /proc/PID/cwd is a symlink whose target the kernel keeps current
+  # regardless of what's actually at that path — File.readlink only ever
+  # reads the link's target string, so the target doesn't need to exist.
+  def fake_process(root, pid, comm:, cwd:, cmdline:)
+    dir = File.join(root, pid.to_s)
+    FileUtils.mkdir_p(dir)
+    File.write(File.join(dir, "comm"), "#{comm}\n")
+    File.write(File.join(dir, "cmdline"), cmdline.join("\0") + "\0")
+    File.symlink(cwd, File.join(dir, "cwd"))
+  end
 
   # Spawns `command` with its cwd set to a fresh launch directory, and
   # builds a fake session file living under a project directory slugified

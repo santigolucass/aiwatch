@@ -54,6 +54,18 @@ module Aiwatch
       prices[model]
     end
 
+    # LiteLLM's pricing data already carries each model's real context
+    # window (max_input_tokens) — the authoritative source for the
+    # dashboard's context-window bar, rather than a hardcoded guess. A
+    # naive 200k-token assumption is actively wrong for 1M-context
+    # models: on a real corpus, 70-80% of turns on those models exceed
+    # 200k tokens (see docs/decisions.md). nil when the model or the
+    # field is unknown — callers must not assume a default silently.
+    def context_limit_for(model)
+      entry = price_for(model)
+      entry && entry["max_input_tokens"]
+    end
+
     private
 
     def load

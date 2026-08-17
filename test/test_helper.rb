@@ -19,6 +19,11 @@ class FakePricingTable
     @prices[model]
   end
 
+  def context_limit_for(model)
+    entry = @prices[model]
+    entry && entry["max_input_tokens"]
+  end
+
   attr_reader :prices
 
   def warnings

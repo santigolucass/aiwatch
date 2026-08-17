@@ -1,10 +1,10 @@
 # frozen_string_literal: true
 
 module Aiwatch
-  # Finds the PID of a `command_name` process that was launched from a
-  # session's project directory — without an external dependency (no
-  # lsof, no gem), which matters because this project has zero runtime
-  # dependencies by design.
+  # Finds `command_name` processes by their real, current working
+  # directory — without an external dependency (no lsof, no gem), which
+  # matters because this project has zero runtime dependencies by
+  # design.
   #
   # Does NOT match by open file descriptor (Claude Code writes its
   # session log append-only — open, write, close — per event, so
@@ -24,28 +24,39 @@ module Aiwatch
   # Claude Code names project directories, and comparing that against the
   # session file's actual parent directory name on disk.
   #
-  # Linux-only: /proc doesn't exist on macOS, so this returns nil there
-  # rather than raising. Returns nil (not a guess) when zero or more than
-  # one process matches — sending a signal to the wrong process is worse
-  # than not finding one.
+  # Linux-only: /proc doesn't exist on macOS, so this returns nil/empty
+  # there rather than raising.
   module ProcessFinder
     COMMAND_NAME = "claude"
+    DEFAULT_PROC_ROOT = "/proc"
 
     module_function
 
-    def find_pid(session_file_path, command_name: COMMAND_NAME)
-      return nil unless File.directory?("/proc")
+    # Every `command_name` process currently running, one /proc scan for
+    # the whole dashboard (the live table's per-tick PID/BRANCH/CPU/MEM
+    # columns all key off this) rather than one scan per session, which
+    # is what repeatedly calling #find_pid would cost.
+    def find_all(command_name: COMMAND_NAME, proc_root: DEFAULT_PROC_ROOT)
+      return [] unless File.directory?(proc_root)
 
-      target_slug = File.basename(File.dirname(File.expand_path(session_file_path)))
+      Dir.foreach(proc_root).select { |entry| /\A\d+\z/.match?(entry) }.filter_map do |pid|
+        next unless safe_read(File.join(proc_root, pid, "comm"))&.strip == command_name
 
-      matches = Dir.foreach("/proc").select { |entry| /\A\d+\z/.match?(entry) }.select do |pid|
-        next false unless safe_read("/proc/#{pid}/comm")&.strip == command_name
+        cwd = safe_readlink(File.join(proc_root, pid, "cwd"))
+        next unless cwd
 
-        cwd = safe_readlink("/proc/#{pid}/cwd")
-        cwd && slugify(cwd) == target_slug
+        cmdline = safe_read(File.join(proc_root, pid, "cmdline")).to_s.split("\0")
+        {pid: pid.to_i, cwd: cwd, slug: slugify(cwd), cmdline: cmdline}
       end
+    end
 
-      (matches.length == 1) ? matches.first.to_i : nil
+    # Returns nil (not a guess) when zero or more than one process
+    # matches — sending a signal to the wrong process is worse than not
+    # finding one.
+    def find_pid(session_file_path, command_name: COMMAND_NAME, proc_root: DEFAULT_PROC_ROOT)
+      target_slug = File.basename(File.dirname(File.expand_path(session_file_path)))
+      matches = find_all(command_name: command_name, proc_root: proc_root).select { |p| p[:slug] == target_slug }
+      (matches.length == 1) ? matches.first[:pid] : nil
     end
 
     def slugify(path)
