@@ -16,7 +16,7 @@ Initial release. Claude Code only.
 - `aiwatch daily` — tokens and cost aggregated per local calendar day.
 - `aiwatch show <id>` — per-model breakdown for one session, resolved by a
   git-style unique id prefix.
-- `aiwatch live` — a full-screen, ctop-style operations panel for active
+- `aiwatch live` — a full-screen operations panel for active
   Claude Code sessions: a 13-column session table (PID, status, context
   occupancy, git branch, cost, CPU%/MEM%, a CPU sparkline) grouped by
   agent kind, a sidebar with process/token/context-window detail for the

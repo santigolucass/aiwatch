@@ -5,7 +5,7 @@
 ![Ruby](https://img.shields.io/badge/ruby-%3E%3D%203.2-CC342D)
 ![Zero runtime dependencies](https://img.shields.io/badge/dependencies-zero-brightgreen)
 
-**An `htop`/`ctop` for your local AI coding agents.** It reads the session
+**An `htop` for your local AI coding agents.** It reads the session
 logs [Claude Code](https://claude.com/product/claude-code) already keeps on
 your machine and turns them into token usage, estimated cost, process
 stats, and a live event feed — per session, per day, or as a full-screen
@@ -136,7 +136,7 @@ An ambiguous prefix lists the matching session ids instead of guessing.
 ### `aiwatch live`
 
 A full-screen, auto-refreshing operations panel for your active Claude
-Code sessions — a `ctop` for agents, not just an `htop`. Every session's
+Code sessions — process stats, not just a token/cost table. Every session's
 row carries its OS process (PID, CPU%, MEM%, a CPU sparkline), its real
 git branch, and a live context-window occupancy estimate; the selected
 session expands into a sidebar (process detail, token/cost totals, a

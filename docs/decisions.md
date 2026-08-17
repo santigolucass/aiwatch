@@ -196,7 +196,7 @@ attempts.
 
 ## A killed session is detected as dead, not suppressed locally
 
-Superseded by the ctop-style dashboard (see below): `active?` (log file
+Superseded by the full-screen dashboard (see below): `active?` (log file
 mtime) now only decides whether a session is *tracked* at all; whether
 it's shown as ACTIVE or DEAD is re-derived every tick from a live `/proc`
 scan, matched against each session's project directory the same way
@@ -207,7 +207,7 @@ already shows it as DEAD without needing to separately remember "this id
 was killed" — the old `@killed_ids` local-suppression hash this section
 used to describe is gone; liveness is asked for fresh, not cached.
 
-## `live` became a ctop-style dashboard
+## `live` became a full-screen operations dashboard
 
 The single-view table (`docs/decisions.md`'s entries above, up through
 "Session names come from `ai-title` lines") was replaced with a
@@ -366,8 +366,8 @@ exactly the tick a rotation is detected.
 calls, assistant text snippets, user prompts) — the one place in
 aiwatch that does. This directly reverses the earlier stated policy that
 `message.content` (including `thinking` blocks) is "never logged or
-displayed by aiwatch." Made deliberately, not accidentally: the ctop-
-style dashboard's whole point is showing what a session is *doing right
+displayed by aiwatch." Made deliberately, not accidentally: the
+dashboard's whole point is showing what a session is *doing right
 now*, and a feed that can't say what happened isn't that. Everything
 stays 100% local exactly as before — the difference is that this
 content now reaches the screen (and an `E` export), not just token/cost

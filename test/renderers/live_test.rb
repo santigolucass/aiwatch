@@ -7,7 +7,7 @@ require "tmpdir"
 require "fileutils"
 require "json"
 
-# End-to-end tests for the ctop-style dashboard (Aiwatch::Live::App, via
+# End-to-end tests for the full-screen dashboard (Aiwatch::Live::App, via
 # the Renderers::Live facade). Unlike the old single-view `live`, the
 # dashboard reads real session files on disk (SessionStore tails them
 # incrementally) rather than an in-memory adapter double, so every test
