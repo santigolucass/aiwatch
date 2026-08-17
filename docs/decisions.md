@@ -433,6 +433,19 @@ quoting this export actually needs (quote a cell containing a comma,
 quote, or newline; double any embedded quotes) rather than pull in the
 gem for that.
 
+The same class of bug slipped through anyway, caught by CI rather than
+this reasoning: `o`'s clipboard copy used `require "base64"` +
+`Base64.strict_encode64`, and `base64` *also* became a bundled gem in
+Ruby 3.4 — this project's own local dev Ruby is 3.2, where that
+`require` still silently works, so nothing caught it locally. The real
+CI matrix (3.2/3.3/3.4) did: a clean `LoadError` on 3.4 only. Fixed by
+using `Array#pack("m0")` instead, which produces the identical
+standard-base64 output as `Base64.strict_encode64` but is core Ruby
+(`Array#pack`), not a library `require` at all — nothing to become a
+bundled gem out from under it. Worth remembering next time a new stdlib
+call gets added here: check whether it's a `require` for something Ruby
+core already gives you unprompted.
+
 ## Session names come from `ai-title` lines, last one wins
 
 `claude --resume`'s picker shows a human-readable title per session

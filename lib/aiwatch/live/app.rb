@@ -1,7 +1,5 @@
 # frozen_string_literal: true
 
-require "base64"
-
 module Aiwatch
   module Live
     # The dashboard's main loop: read a key, act on it, refresh data on a
@@ -214,7 +212,12 @@ module Aiwatch
         return unless session
 
         command = "claude --resume #{session.id}"
-        @screen.write_raw("\e]52;c;#{Base64.strict_encode64(command)}\a")
+        # [text].pack("m0") is core Ruby (Array#pack), not the `base64`
+        # library — `require "base64"` would work on Ruby <= 3.3 but
+        # raise on 3.4+, where base64 became a bundled (non-default) gem
+        # rather than a gem Ruby always ships with. Same reasoning this
+        # project already applies to CSV export (see docs/decisions.md).
+        @screen.write_raw("\e]52;c;#{[command].pack("m0")}\a")
         @state.status_message = "Resume command copied to clipboard: #{command}"
       end
 
