@@ -1,6 +1,9 @@
 # frozen_string_literal: true
 
 require_relative "aiwatch/version"
+require_relative "aiwatch/tui/ansi"
+require_relative "aiwatch/tui/theme"
+require_relative "aiwatch/ring_buffer"
 require_relative "aiwatch/usage_event"
 require_relative "aiwatch/model_usage"
 require_relative "aiwatch/session"

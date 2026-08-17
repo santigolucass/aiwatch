@@ -1,11 +1,14 @@
 # frozen_string_literal: true
 
+require_relative "../tui/ansi"
+
 module Aiwatch
   module Renderers
     # Plain-text aligned grid: the alignment engine shared by Table (for
     # list/daily/show) and Live (for its own custom columns). Numeric-ish
     # columns can right-align; ANSI color codes are stripped when measuring
-    # column widths so coloring text doesn't break alignment.
+    # column widths so coloring text doesn't break alignment. ANSI handling
+    # itself lives in Tui::Ansi — this module just calls through to it.
     #
     # Deliberately does NOT attempt to detect double-width Unicode glyphs —
     # see docs/decisions.md for why: some glyphs (e.g. U+25CF BLACK CIRCLE)
@@ -13,8 +16,6 @@ module Aiwatch
     # misalign a column that contains one. Only single-column-safe glyphs
     # (plain ASCII, Braille) should go in a column measured by this class.
     module TextTable
-      ANSI = /\e\[[0-9;]*m/
-
       module_function
 
       # max_widths: optional per-column cap (nil entries are uncapped). A
@@ -46,13 +47,11 @@ module Aiwatch
       end
 
       def visible_length(cell)
-        cell.to_s.gsub(ANSI, "").length
+        Tui::Ansi.visible_length(cell)
       end
 
       def truncate(cell, max)
-        text = cell.to_s
-        return text if text.length <= max || max < 2
-        text[0, max - 1] + "…"
+        Tui::Ansi.truncate(cell, max)
       end
 
       def cap_row(row, max_widths)

@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative "../tui/theme"
+
 module Aiwatch
   module Renderers
     # Table output for list/daily/show, built on TextTable's alignment
@@ -8,6 +10,12 @@ module Aiwatch
     # used a leading "●" column, which misaligned in terminals that render
     # that glyph as double-width (see docs/decisions.md).
     class Table
+      # list/daily/show render in a plain 16-color terminal, not the
+      # 256-color palette `live`'s dashboard paints its own background
+      # with — a bold basic green reads correctly everywhere `--color`
+      # matters here: a redirected/piped/dumb terminal.
+      THEME = Tui::Theme.new(depth: :ansi16)
+
       LIST_HEADERS = ["SESSION", "NAME", "PROJECT", "MODEL(S)", "INPUT", "OUTPUT", "CACHE R/W", "COST (USD)", "LAST ACTIVITY"].freeze
       LIST_ALIGN = [:left, :left, :left, :left, :right, :right, :right, :right, :left].freeze
       # NAME, PROJECT and MODEL(S) are the only unbounded columns (the
@@ -83,7 +91,7 @@ module Aiwatch
       def session_id_cell(session, active, color)
         return session.short_id unless active && color
 
-        "\e[1;32m#{session.short_id}\e[0m"
+        THEME.paint(session.short_id, :active, bold: true)
       end
 
       def daily_row(day)
