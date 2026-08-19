@@ -66,13 +66,24 @@ module Aiwatch
       # cost_for: optional Proc(session) -> Float, only consulted when
       # sort_key is :cost — keeps State itself free of a CostCalculator
       # dependency; App supplies the lookup.
+      # Filter/sort/pin/purge apply to top-level sessions only — a
+      # subagent isn't independently filterable or pinnable, it just
+      # follows whichever session (or, for one spawned by another
+      # subagent, whichever subagent) spawned it. A parent's whole
+      # subtree is attached immediately after it, recursively, matching
+      # real observed nesting (a subagent can itself spawn a subagent).
       def visible(sessions, cost_for: nil)
-        list = sessions.reject { |s| @purged_ids.key?(s.id) }
+        top_level, subagents = sessions.partition { |s| !s.subagent? }
+        children_by_parent = subagents.group_by(&:parent_id)
+
+        list = top_level.reject { |s| @purged_ids.key?(s.id) }
         list = @show_dead ? list : list.reject(&:dead?)
         list = apply_filter(list)
         list = apply_sort(list, cost_for)
         pinned, rest = list.partition { |s| pinned?(s.id) }
-        pinned + rest
+        ordered = pinned + rest
+
+        ordered.flat_map { |parent| [parent] + descendants_of(parent.id, children_by_parent) }
       end
 
       # Re-syncs selection after a refresh: if the selected session
@@ -111,6 +122,11 @@ module Aiwatch
       end
 
       private
+
+      def descendants_of(id, children_by_parent)
+        direct = (children_by_parent[id] || []).sort_by { |s| s.last_seen_at || Time.at(0) }.reverse
+        direct.flat_map { |child| [child] + descendants_of(child.id, children_by_parent) }
+      end
 
       def matches_text?(session, needle)
         haystack = [session.title, session.project, session.branch]

@@ -3,14 +3,18 @@
 require "test_helper"
 
 class LiveStateTest < Minitest::Test
-  FakeSession = Struct.new(:id, :title, :project, :branch, :dead, :last_seen_at, :first_seen_at) do
+  FakeSession = Struct.new(:id, :title, :project, :branch, :dead, :last_seen_at, :first_seen_at, :parent_id) do
     def dead?
       dead
     end
+
+    def subagent?
+      !parent_id.nil?
+    end
   end
 
-  def session(id, title: "t", project: nil, branch: nil, dead: false, last_seen_at: Time.now, first_seen_at: Time.now)
-    FakeSession.new(id, title, project, branch, dead, last_seen_at, first_seen_at)
+  def session(id, title: "t", project: nil, branch: nil, dead: false, last_seen_at: Time.now, first_seen_at: Time.now, parent_id: nil)
+    FakeSession.new(id, title, project, branch, dead, last_seen_at, first_seen_at, parent_id)
   end
 
   def state
@@ -199,5 +203,56 @@ class LiveStateTest < Minitest::Test
     s = state
     s.search_text = ""
     refute s.jump_to_next_match([session("a")])
+  end
+
+  # --- subagent nesting ---
+
+  def test_a_subagent_appears_immediately_after_its_parent
+    s = state
+    parent = session("p")
+    child = session("c", parent_id: "p")
+    assert_equal %w[p c], s.visible([parent, child]).map(&:id)
+  end
+
+  def test_a_subagent_nested_under_another_subagent_appears_right_after_it
+    s = state
+    parent = session("p")
+    outer = session("outer", parent_id: "p")
+    inner = session("inner", parent_id: "outer")
+    assert_equal %w[p outer inner], s.visible([parent, outer, inner]).map(&:id)
+  end
+
+  def test_multiple_children_of_the_same_parent_sort_by_last_activity
+    s = state
+    parent = session("p")
+    older = session("c1", parent_id: "p", last_seen_at: Time.now - 100)
+    newer = session("c2", parent_id: "p", last_seen_at: Time.now)
+    assert_equal %w[p c2 c1], s.visible([parent, older, newer]).map(&:id)
+  end
+
+  def test_a_parent_excluded_by_filter_takes_its_whole_subtree_with_it
+    s = state
+    parent = session("p", title: "Something else")
+    child = session("c", parent_id: "p", title: "Something else")
+    s.filter_text = "login"
+    assert_equal [], s.visible([parent, child])
+  end
+
+  def test_subagents_are_not_independently_sorted_into_the_top_level_order
+    s = state
+    a = session("a", last_seen_at: Time.now - 100)
+    b = session("b", last_seen_at: Time.now)
+    child_of_a = session("child", parent_id: "a", last_seen_at: Time.now) # more recent than "a" itself
+    # default sort is last_activity desc: b, then a (and a's child right after it)
+    assert_equal %w[b a child], s.visible([a, b, child_of_a]).map(&:id)
+  end
+
+  def test_pinning_the_parent_brings_its_subtree_along
+    s = state
+    a = session("a", last_seen_at: Time.now - 100)
+    b = session("b", last_seen_at: Time.now)
+    child_of_a = session("child", parent_id: "a")
+    s.toggle_pin("a")
+    assert_equal %w[a child b], s.visible([a, b, child_of_a]).map(&:id)
   end
 end
