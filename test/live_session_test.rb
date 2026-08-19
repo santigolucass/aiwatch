@@ -51,4 +51,42 @@ class LiveSessionTest < Minitest::Test
     live.ingest({"type" => "system", "subtype" => "turn_duration", "durationMs" => 100}, {})
     assert_equal 100, live.turn_ms
   end
+
+  def test_top_level_session_defaults_to_no_parent
+    session = Aiwatch::Session.new(id: "s1", file_path: File::NULL)
+    live = Aiwatch::LiveSession.new(session: session)
+    assert_nil live.parent_id
+    assert_nil live.agent_id
+    refute live.subagent?
+  end
+
+  def test_subagent_session_carries_its_parent_and_agent_id
+    session = Aiwatch::Session.new(id: "sub1", file_path: File::NULL)
+    live = Aiwatch::LiveSession.new(session: session, parent_id: "parent1", agent_id: "abc123")
+    assert_equal "parent1", live.parent_id
+    assert_equal "abc123", live.agent_id
+    assert live.subagent?
+  end
+
+  def test_title_falls_back_to_the_session_title_by_default
+    session = Aiwatch::Session.new(id: "s1", file_path: File::NULL)
+    session.set_title("From ai-title")
+    live = Aiwatch::LiveSession.new(session: session)
+    assert_equal "From ai-title", live.title
+  end
+
+  def test_title_override_takes_priority_over_the_session_title
+    session = Aiwatch::Session.new(id: "s1", file_path: File::NULL)
+    session.set_title("From ai-title")
+    live = Aiwatch::LiveSession.new(session: session)
+    live.title = "Implement KAN-156"
+    assert_equal "Implement KAN-156", live.title
+  end
+
+  def test_agent_type_is_settable
+    session = Aiwatch::Session.new(id: "s1", file_path: File::NULL)
+    live = Aiwatch::LiveSession.new(session: session)
+    live.agent_type = "general-purpose"
+    assert_equal "general-purpose", live.agent_type
+  end
 end

@@ -13,14 +13,23 @@ module Aiwatch
   class LiveSession
     extend Forwardable
 
-    def_delegators :@session, :id, :short_id, :file_path, :title, :project, :models,
+    def_delegators :@session, :id, :short_id, :file_path, :project, :models,
       :total_input_tokens, :total_output_tokens, :total_cache_read_tokens, :total_cache_creation_tokens,
       :first_seen_at, :last_seen_at, :model_usages, :active?
 
-    attr_reader :session, :feed, :cpu_history, :mem_history, :token_history
-    attr_accessor :pid, :cpu_percent, :mem_percent, :branch, :dead, :totals_partial, :pinned, :color_index
+    attr_reader :session, :feed, :cpu_history, :mem_history, :token_history, :parent_id, :agent_id
+    attr_accessor :pid, :cpu_percent, :mem_percent, :branch, :dead, :totals_partial, :pinned, :color_index, :agent_type
 
-    def initialize(session:, feed_capacity: 200, history_capacity: 40)
+    # parent_id/agent_id are both nil for a top-level session. A subagent
+    # (spawned via the Agent tool, its own transcript nested under
+    # ~/.claude/projects/<slug>/<parent-uuid>/subagents/agent-<agent_id>.jsonl,
+    # possibly under another subagent rather than directly under a
+    # top-level session — spawnDepth in its .meta.json can be > 1) sets
+    # parent_id to whichever session spawned it and agent_id to the hex
+    # id in its own filename. Its title (there's no ai-title line in a
+    # subagent's own transcript to get one from) is set directly by
+    # SessionStore from that same .meta.json's description field.
+    def initialize(session:, feed_capacity: 200, history_capacity: 40, parent_id: nil, agent_id: nil)
       @session = session
       @feed = RingBuffer.new(feed_capacity)
       @feed_builder = FeedBuilder.new(feed: @feed)
@@ -35,6 +44,22 @@ module Aiwatch
       @totals_partial = false
       @pinned = false
       @color_index = nil
+      @parent_id = parent_id
+      @agent_id = agent_id
+      @title_override = nil
+      @agent_type = nil
+    end
+
+    def subagent?
+      !@parent_id.nil?
+    end
+
+    def title
+      @title_override || @session.title
+    end
+
+    def title=(value)
+      @title_override = value
     end
 
     def ingest(obj, seen_message_ids)
