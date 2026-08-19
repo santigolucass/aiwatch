@@ -8,9 +8,15 @@ module Aiwatch
       module StatsBar
         module_function
 
+        # "Sessions" (active/dead/total) counts top-level sessions only —
+        # a subagent isn't a session in that sense, it's detail under
+        # one. Token/cost totals sum across everything in `sessions`
+        # (including subagents), since that's real spend regardless of
+        # which row it's attributed to.
         def draw(canvas, rect, theme:, sessions:, now:, total_cost:)
-          active = sessions.count { |s| !s.dead? }
-          dead = sessions.count(&:dead?)
+          top_level = sessions.reject(&:subagent?)
+          active = top_level.count { |s| !s.dead? }
+          dead = top_level.count(&:dead?)
           total_in = sessions.sum { |s| s.total_input_tokens || 0 }
           total_out = sessions.sum { |s| s.total_output_tokens || 0 }
           total_cache = sessions.sum { |s| (s.total_cache_read_tokens || 0) + (s.total_cache_creation_tokens || 0) }
@@ -19,7 +25,7 @@ module Aiwatch
             "#{theme.paint(theme.glyph(:dead_dot), :dead)} #{dead} dead   |   " \
             "Cost: #{Format.cost(total_cost)}   |   #{Format.clock(now)}"
           line2 = "Tokens  In: #{Format.count(total_in)}   Out: #{Format.count(total_out)}   Cache: #{Format.count(total_cache)}"
-          line3 = "Sessions: #{active} active  #{dead} dead  #{sessions.length} total#{avg_ctx_suffix(sessions)}"
+          line3 = "Sessions: #{active} active  #{dead} dead  #{top_level.length} total#{avg_ctx_suffix(sessions)}"
 
           canvas.write(rect.row, rect.col, line1, max: rect.width)
           canvas.write(rect.row + 1, rect.col, line2, max: rect.width)
