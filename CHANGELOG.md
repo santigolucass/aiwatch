@@ -21,7 +21,12 @@ Initial release. Claude Code only.
   occupancy, git branch, cost, CPU%/MEM%, a CPU sparkline) grouped by
   agent kind, a sidebar with process/token/context-window detail for the
   selected session, and a scrolling per-session event log narrating tool
-  calls and replies. Navigate with the arrows/`hjkl`; `x`/`X` kill/force-
+  calls and replies. Subagents (spawned via the `Agent` tool, including
+  a subagent spawning its own subagent) render as indented, dimmed rows
+  nested directly under whichever session or subagent launched them,
+  with their own cost/token accounting; a parent session with an active
+  subagent is never shown as DEAD even when its own OS process can't be
+  matched. Navigate with the arrows/`hjkl`; `x`/`X` kill/force-
   kill the selected session (matched by project directory, not wherever
   the agent last `cd`'d to — Linux only) after a confirm, `K` kills every
   visible session but requires typing "yes"; `p` pins, `A` purges dead

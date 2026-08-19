@@ -141,7 +141,11 @@ row carries its OS process (PID, CPU%, MEM%, a CPU sparkline), its real
 git branch, and a live context-window occupancy estimate; the selected
 session expands into a sidebar (process detail, token/cost totals, a
 context-window bar) and a scrolling log of what it's actually doing
-right now (tool calls, assistant replies, user prompts):
+right now (tool calls, assistant replies, user prompts). Subagents
+spawned via the `Agent` tool show up nested directly under whichever
+session launched them, indented and dimmed — and a session with an
+active subagent is never shown as dead, even if its own OS process
+can't be pinned down:
 
 ```
 ┌────────────────────────────────────────────────────────────────────────────────────────────────┐

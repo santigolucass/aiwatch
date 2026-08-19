@@ -465,3 +465,61 @@ project.
 A model absent from the pricing table renders cost as `?` with a warning
 surfaced to the user — never a silent `$0.00`, which would be
 indistinguishable from "genuinely free."
+
+## Subagents: DEAD-while-active, and nesting them in the table
+
+A real bug report: a session sat at STATUS=DEAD in `live` while it was
+genuinely active — waiting on a subagent (spawned via the `Agent` tool)
+to finish. Two live `claude` processes can share the exact same `cwd`
+(confirmed on this machine: two terminals opened from
+`/home/lucas/code/fluxo`, identical `cmdline`), and `ProcessFinder`
+correctly refuses to guess which is which, returning no match. Before
+this fix, no match meant DEAD, full stop — even though the session's own
+file was being actively written to by a running subagent.
+
+Fixed in two parts, since the user's actual ask was both "make this
+classification correct" and "show me the subagent, not just paper over
+the status field":
+
+1. **Liveness**: `App#rematch_processes` now checks, for any top-level
+   session whose PID match is ambiguous or absent, whether it has a
+   subagent among the currently-eligible (recently active) sessions. If
+   so, it's active regardless of whether its own process could be
+   pinned down. A subagent itself is never matched against `/proc` at
+   all — nothing in its transcript ties it back to a specific PID or
+   thread, so the only liveness signal available for one is its own
+   file's mtime, which membership in the eligible set already confirms.
+
+2. **Nesting**: subagents render as indented rows directly under
+   whichever session (or subagent — nesting can be more than one level
+   deep, see `docs/claude-code-format.md`) spawned them, dimmed unless
+   selected, via a plain ASCII `"- "` marker rather than a Unicode
+   tree-branch glyph (Ambiguous East-Asian-Width glyphs have broken
+   column alignment here twice before — same rule as the selection
+   cursor). `State#visible` filters/sorts/pins/purges the top-level list
+   only, then splices each parent's whole subtree in immediately after
+   it, recursively — this means selection, navigation, filtering, and
+   pinning all work on subagent rows for free, since by the time they
+   reach the rest of `State`'s logic they're just entries in an ordinary
+   flat list. The session table's box title and the stats bar's
+   active/dead/total counts both count top-level sessions only; a
+   subagent isn't a session in that sense, it's detail under one. Token
+   and cost totals still sum across everything, including subagents,
+   since that's real spend regardless of which row it's attributed to.
+
+**Titling, tried two ways.** The first attempt had `FeedBuilder` track
+`description`/`agentId` pairs off the *parent* session's own
+`toolUseResult` lines, and `SessionStore` cross-reference each subagent
+against its parent's table after every refresh. It worked, but weakly:
+a subagent could only get a title once its parent's own backfill had
+progressed far enough to fold the relevant line, which for a large real
+session file sometimes never happened inside a bounded test loop, and
+gave only 7/339 titled subagents on the very first tick against the real
+corpus. Investigating that gap surfaced a `.meta.json` file
+(`docs/claude-code-format.md`) sitting right next to every subagent
+transcript, carrying `description`/`agentType`/`parentAgentId` directly
+— no backfill dependency, no cross-referencing, and (via `parentAgentId`)
+the only way to detect subagent-spawned-a-subagent nesting at all. The
+`toolUseResult` machinery was fully reverted in favor of reading
+`.meta.json` at cursor-construction time; coverage went to 338/339
+titled immediately.

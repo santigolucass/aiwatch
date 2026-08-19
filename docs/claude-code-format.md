@@ -113,11 +113,46 @@ Fields present but **not** used by aiwatch: `requestId`, `uuid`,
 The file's UUID (its name) is the session id. A session is "active" if its
 file's mtime is within the configured threshold (default 5 minutes) of now.
 
+## Subagent transcripts
+
+A subagent spawned via the `Agent` tool gets its own transcript, nested
+under whichever session launched it:
+
+```
+~/.claude/projects/<project-slug>/<parent-session-uuid>/subagents/agent-<hex-id>.jsonl
+~/.claude/projects/<project-slug>/<parent-session-uuid>/subagents/agent-<hex-id>.meta.json
+```
+
+The `.jsonl` file is the same shape as a top-level session (`assistant`/
+`user` lines, same `usage` fields) — `aiwatch` reads it through the
+identical parsing path, so a subagent gets real cost/token accounting
+rather than the "no usage, unattributed" gap this doc used to note here.
+
+The sibling `.meta.json` gives everything the `.jsonl` alone doesn't:
+
+```jsonc
+{
+  "agentType": "general-purpose",
+  "description": "Implementar KAN-156 credenciais Órulo",
+  "toolUseId": "toolu_...",
+  "parentAgentId": "a1a0e84cc969e55b4",   // present only if spawned by another subagent
+  "spawnDepth": 2
+}
+```
+
+`description` becomes the subagent's row title in `live` (no
+description → falls back to `?`, same convention as everywhere else).
+`parentAgentId`, when present, means this subagent's parent is *another
+subagent*, not the top-level session directly — real nesting more than
+one level deep, confirmed in a corpus sample (170 of 339 subagent files
+had a `parentAgentId`). When absent, the parent is the top-level session
+whose uuid appears in the path (two directories up from the `.jsonl`).
+Reading `.meta.json` has no backfill dependency, unlike deriving the
+description from the parent session's own `toolUseResult` lines (tried
+first, rejected — see `docs/decisions.md`).
+
 ## Known gaps
 
-- Subagent / sidechain events (`isSidechain: true`) carried no `usage` in
-  the inspected corpus, so their cost, if any, is not separately
-  attributed. Revisit if that's ever observed to be false.
 - `usage.iterations` (an array, seen with exactly one entry per event in
   the corpus) is not consumed. If Claude Code ever emits multiple
   iterations per line for agentic/tool loops, usage may need to be summed
