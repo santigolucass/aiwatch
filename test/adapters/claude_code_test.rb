@@ -1,6 +1,8 @@
 # frozen_string_literal: true
 
 require_relative "../test_helper"
+require "tmpdir"
+require "fileutils"
 
 class AdaptersClaudeCodeTest < Minitest::Test
   include FixturePath
@@ -83,5 +85,22 @@ class AdaptersClaudeCodeTest < Minitest::Test
     adapter = Aiwatch::Adapters::ClaudeCode.new(dir: fixture_path("does-not-exist"))
 
     assert_equal [], adapter.discover_sessions
+  end
+
+  def test_subagent_files_finds_files_nested_under_a_parent_sessions_subagents_dir
+    Dir.mktmpdir do |dir|
+      proj = File.join(dir, "-home-x-proj")
+      sub_dir = File.join(proj, "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", "subagents")
+      FileUtils.mkdir_p(sub_dir)
+      path = File.join(sub_dir, "agent-abc123.jsonl")
+      File.write(path, "")
+
+      found = Aiwatch::Adapters::ClaudeCode.new(dir: dir).subagent_files
+      assert_equal [path], found
+    end
+  end
+
+  def test_subagent_files_is_empty_when_no_session_has_subagents
+    assert_equal [], adapter.subagent_files
   end
 end

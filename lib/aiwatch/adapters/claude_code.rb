@@ -30,6 +30,15 @@ module Aiwatch
         Dir.glob(File.join(@dir, "*", "*.jsonl"))
       end
 
+      # A subagent spawned via the Agent tool writes its own transcript to
+      # ~/.claude/projects/<slug>/<parent-session-uuid>/subagents/agent-<id>.jsonl
+      # — same JSONL shape as a top-level session, just nested under
+      # whichever session launched it. Public for the same reason as
+      # #session_files.
+      def subagent_files
+        Dir.glob(File.join(@dir, "*", "*", "subagents", "*.jsonl"))
+      end
+
       private
 
       def parse_file(path)
