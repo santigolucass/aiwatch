@@ -189,7 +189,7 @@ module Aiwatch
         # otherwise keep showing as active/live until the next full
         # refresh — re-scan /proc right now so it reads as dead on the
         # very next frame instead of waiting out the refresh interval.
-        rematch_processes(@sessions)
+        rematch_all(@sessions)
         draw(now)
       rescue Errno::ESRCH
         @state.status_message = "Process for session #{session.short_id} was already gone."
@@ -277,7 +277,7 @@ module Aiwatch
         visible = @state.visible(@sessions, cost_for: cost_lookup)
         killable = visible.reject(&:dead?)
         killed = killable.count { |session| attempt_kill(session) }
-        rematch_processes(@sessions)
+        rematch_all(@sessions)
         @state.status_message = "Sent SIGTERM to #{killed}/#{killable.length} active session(s)."
         draw(now)
       end
@@ -296,19 +296,43 @@ module Aiwatch
         sessions = @store.refresh(priority_id: @state.selected_id)
         @all_sessions = sessions
         eligible = sessions.select { |s| s.active?(now: now, threshold_minutes: @active_threshold_minutes) }
-        rematch_processes(eligible)
+        rematch_all(eligible)
         eligible
       end
 
-      # One /proc scan for every session, rather than one per session —
-      # this is exactly the cost the old single-session ProcessFinder
-      # call would have paid N times per tick.
-      def rematch_processes(sessions)
+      def rematch_all(sessions)
+        top_level, subagents = sessions.partition { |s| !s.subagent? }
+        rematch_processes(top_level, subagents)
+        mark_subagents_active(subagents)
+      end
+
+      # Subagents don't correspond to a distinguishable OS process at
+      # all reliably (no cmdline argument ties one back to its agentId),
+      # so no /proc matching is attempted for them — being in `eligible`
+      # already means their own file's mtime is within the active
+      # window, which is the only liveness signal available for one.
+      def mark_subagents_active(subagents)
+        subagents.each { |s| s.dead = false }
+      end
+
+      # One /proc scan for every top-level session, rather than one per
+      # session — this is exactly the cost the old single-session
+      # ProcessFinder call would have paid N times per tick. A top-level
+      # session whose own PID can't be matched (ambiguous: two terminals
+      # opened from the same directory is common) is NOT necessarily
+      # dead — it reads as still active if it has a subagent with recent
+      # activity of its own, since that's real, current work regardless
+      # of whether the parent's own process could be pinned down.
+      def rematch_processes(top_level, subagents)
         procs = @process_finder_all.call
         by_slug = procs.group_by { |p| p[:slug] }
+        # Hash used as a set (Array#to_set needs `require "set"`, and
+        # this project checks stdlib availability carefully after the
+        # base64-on-Ruby-3.4 lesson — see docs/decisions.md).
+        active_via_subagent = subagents.each_with_object({}) { |s, h| h[s.parent_id] = true }
         matched_pids = []
 
-        sessions.each do |session|
+        top_level.each do |session|
           slug = File.basename(File.dirname(session.file_path))
           candidates = by_slug[slug] || []
           if candidates.length == 1
@@ -316,11 +340,11 @@ module Aiwatch
             matched_pids << candidates.first[:pid]
           else
             session.pid = nil
-            session.dead = true
+            session.dead = !active_via_subagent.key?(session.id)
           end
         end
 
-        sample_process_stats(sessions, matched_pids)
+        sample_process_stats(top_level, matched_pids)
       end
 
       def apply_match(session, proc_entry)
