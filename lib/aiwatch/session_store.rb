@@ -40,12 +40,13 @@ module Aiwatch
       @last_stat = {}
     end
 
-    # Returns Array<LiveSession>, one per discovered session file, having
+    # Returns Array<LiveSession>, one per discovered session file — both
+    # top-level sessions and any subagents spawned from them — having
     # read only what changed since the last call. priority_id: a session
     # id whose backfill (if any is pending) should advance this tick
     # ahead of any other pending backfill.
     def refresh(priority_id: nil)
-      paths = @adapter.session_files
+      paths = @adapter.session_files + @adapter.subagent_files
       paths.each { |path| refresh_one(path) }
       prune_missing(paths)
       run_backfill(priority_id)
@@ -53,6 +54,18 @@ module Aiwatch
     end
 
     private
+
+    def subagent_path?(path)
+      File.basename(File.dirname(path)) == "subagents"
+    end
+
+    def parent_id_for(path)
+      File.basename(File.dirname(path, 2))
+    end
+
+    def agent_id_for(path)
+      File.basename(path, ".jsonl").sub(/\Aagent-/, "")
+    end
 
     def refresh_one(path)
       stat = File.stat(path)
@@ -82,14 +95,45 @@ module Aiwatch
     def build_cursor(path)
       id = File.basename(path, ".jsonl")
       session = Session.new(id: id, file_path: path)
-      Cursor.new(TailReader.new(path), session, {}, LiveSession.new(session: session), nil)
+      Cursor.new(TailReader.new(path), session, {}, build_live_session(session, path), nil)
     end
 
     def rebuild_cursor(path, old_cursor)
       session = Session.new(id: old_cursor.session.id, file_path: path)
-      cursor = Cursor.new(old_cursor.tail_reader, session, {}, LiveSession.new(session: session), nil)
+      cursor = Cursor.new(old_cursor.tail_reader, session, {}, build_live_session(session, path), nil)
       @cursors[path] = cursor
       cursor
+    end
+
+    # A subagent's own transcript never carries an ai-title line, so its
+    # label comes from the .meta.json Claude Code writes right alongside
+    # it instead (agent-<id>.jsonl / agent-<id>.meta.json) — verified to
+    # exist for every subagent file in a real corpus, unlike the
+    # alternative (cross-referencing the parent's own Agent tool_use
+    # result), which depends on that parent's backfill having reached the
+    # right line yet. parentAgentId in that same file means this
+    # subagent was spawned by ANOTHER subagent, not directly by the
+    # top-level session — real, observed nesting (spawnDepth 2+), not
+    # just a theoretical case.
+    def build_live_session(session, path)
+      return LiveSession.new(session: session) unless subagent_path?(path)
+
+      meta = read_agent_meta(path)
+      parent_agent_id = meta["parentAgentId"]
+      parent_id = parent_agent_id.is_a?(String) ? "agent-#{parent_agent_id}" : parent_id_for(path)
+
+      live_session = LiveSession.new(session: session, parent_id: parent_id, agent_id: agent_id_for(path))
+      live_session.title = meta["description"] if meta["description"].is_a?(String)
+      live_session.agent_type = meta["agentType"] if meta["agentType"].is_a?(String)
+      live_session
+    end
+
+    def read_agent_meta(path)
+      meta_path = path.sub(/\.jsonl\z/, ".meta.json")
+      parsed = JSON.parse(File.read(meta_path))
+      parsed.is_a?(Hash) ? parsed : {}
+    rescue Errno::ENOENT, Errno::EACCES, IOError, JSON::ParserError
+      {}
     end
 
     def fold_lines(cursor, lines)

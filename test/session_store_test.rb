@@ -25,6 +25,10 @@ class SessionStoreTest < Minitest::Test
     Aiwatch::SessionStore.new(adapter: Aiwatch::Adapters::ClaudeCode.new(dir: dir), **opts)
   end
 
+  def write_session(proj, id:, tokens: 1)
+    File.write(File.join(proj, "#{id}.jsonl"), assistant_line("m-#{id}", tokens) + "\n")
+  end
+
   def test_discovers_a_session_and_reads_its_content
     with_project_dir do |dir, proj|
       File.write(File.join(proj, "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee.jsonl"), assistant_line("m1", 100) + "\n")
@@ -173,6 +177,90 @@ class SessionStoreTest < Minitest::Test
       File.write(path, assistant_line("m1", 1) + "\n{not json\n" + assistant_line("m2", 1) + "\n")
       sessions = store_for(dir).refresh
       assert_equal 2, sessions.first.total_output_tokens
+    end
+  end
+
+  def write_subagent(proj, parent_id:, agent_id:, description: nil, agent_type: nil, parent_agent_id: nil, tokens: 5)
+    sub_dir = File.join(proj, parent_id, "subagents")
+    FileUtils.mkdir_p(sub_dir)
+    File.write(File.join(sub_dir, "agent-#{agent_id}.jsonl"), assistant_line("m-#{agent_id}", tokens) + "\n")
+    meta = {}
+    meta["description"] = description if description
+    meta["agentType"] = agent_type if agent_type
+    meta["parentAgentId"] = parent_agent_id if parent_agent_id
+    File.write(File.join(sub_dir, "agent-#{agent_id}.meta.json"), meta.to_json)
+  end
+
+  def test_discovers_a_subagent_nested_under_its_parent_session
+    with_project_dir do |dir, proj|
+      write_session(proj, id: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", tokens: 1)
+      write_subagent(proj, parent_id: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", agent_id: "abc123", description: "Do the thing", agent_type: "general-purpose")
+
+      sessions = store_for(dir).refresh
+      sub = sessions.find(&:subagent?)
+      refute_nil sub
+      assert_equal "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", sub.parent_id
+      assert_equal "abc123", sub.agent_id
+      assert_equal "Do the thing", sub.title
+      assert_equal "general-purpose", sub.agent_type
+      assert_equal 5, sub.total_output_tokens
+    end
+  end
+
+  def test_subagent_with_no_description_has_a_nil_title
+    with_project_dir do |dir, proj|
+      write_session(proj, id: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", tokens: 1)
+      write_subagent(proj, parent_id: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", agent_id: "abc123")
+
+      sub = store_for(dir).refresh.find(&:subagent?)
+      assert_nil sub.title
+    end
+  end
+
+  def test_a_subagent_spawned_by_another_subagent_has_that_subagent_as_its_parent
+    with_project_dir do |dir, proj|
+      write_session(proj, id: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", tokens: 1)
+      write_subagent(proj, parent_id: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", agent_id: "outer", description: "Outer")
+      write_subagent(proj, parent_id: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", agent_id: "inner", description: "Inner", parent_agent_id: "outer")
+
+      sessions = store_for(dir).refresh
+      inner = sessions.find { |s| s.agent_id == "inner" }
+      assert_equal "agent-outer", inner.parent_id
+    end
+  end
+
+  def test_missing_meta_json_does_not_raise_and_leaves_title_nil
+    with_project_dir do |dir, proj|
+      write_session(proj, id: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", tokens: 1)
+      sub_dir = File.join(proj, "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", "subagents")
+      FileUtils.mkdir_p(sub_dir)
+      File.write(File.join(sub_dir, "agent-abc123.jsonl"), assistant_line("m1", 1) + "\n")
+
+      sub = store_for(dir).refresh.find(&:subagent?)
+      refute_nil sub
+      assert_nil sub.title
+    end
+  end
+
+  def test_malformed_meta_json_does_not_raise
+    with_project_dir do |dir, proj|
+      write_session(proj, id: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", tokens: 1)
+      sub_dir = File.join(proj, "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", "subagents")
+      FileUtils.mkdir_p(sub_dir)
+      File.write(File.join(sub_dir, "agent-abc123.jsonl"), assistant_line("m1", 1) + "\n")
+      File.write(File.join(sub_dir, "agent-abc123.meta.json"), "{not json")
+
+      sub = store_for(dir).refresh.find(&:subagent?)
+      refute_nil sub
+      assert_nil sub.title
+    end
+  end
+
+  def test_top_level_sessions_are_never_marked_as_subagents
+    with_project_dir do |dir, proj|
+      write_session(proj, id: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", tokens: 1)
+      sessions = store_for(dir).refresh
+      refute sessions.first.subagent?
     end
   end
 end
